@@ -1,5 +1,7 @@
 FROM python:3.12.5-slim-bookworm
 
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy shared types first so they're available to all agents
