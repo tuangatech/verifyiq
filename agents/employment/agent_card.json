@@ -1,0 +1,35 @@
+{
+  "name": "Employment Verification Agent",
+  "description": "Simulates Equifax Workforce Solutions / The Work Number. Verifies employment status, tenure, and income from payroll records.",
+  "url": "http://employment:8002",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "employment_status",
+      "name": "Employment Status Verification",
+      "description": "Verifies whether the subject is currently employed and returns employer name and start date.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    },
+    {
+      "id": "income_verification",
+      "name": "Income Verification",
+      "description": "Returns verified annual income from payroll records and employment type.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    },
+    {
+      "id": "employment_history",
+      "name": "Employment History",
+      "description": "Returns tenure in years and employment type (full-time, part-time, contract, self-employed).",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    }
+  ],
+  "auth_schemes": [],
+  "capabilities": {
+    "streaming": false,
+    "push_notifications": false,
+    "max_concurrent_tasks": 10
+  }
+}

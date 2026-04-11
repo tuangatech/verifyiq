@@ -1,0 +1,42 @@
+{
+  "name": "Equifax Credit Agent",
+  "description": "Simulates Equifax U.S. Information Solutions. Provides domestic credit scores, tradeline summaries, derogatory mark history, and hard inquiry records.",
+  "url": "http://equifax:8001",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "credit_score",
+      "name": "Credit Score Lookup",
+      "description": "Returns the subject's FICO 8 credit score from Equifax U.S. records.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    },
+    {
+      "id": "tradeline_summary",
+      "name": "Tradeline Summary",
+      "description": "Returns open account count and credit utilization percentage.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    },
+    {
+      "id": "derogatory_marks",
+      "name": "Derogatory Marks History",
+      "description": "Returns count of derogatory marks such as collections, bankruptcies, and charge-offs.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    },
+    {
+      "id": "inquiry_history",
+      "name": "Hard Inquiry History",
+      "description": "Returns the number of hard inquiries in the last 12 months.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    }
+  ],
+  "auth_schemes": [],
+  "capabilities": {
+    "streaming": false,
+    "push_notifications": false,
+    "max_concurrent_tasks": 10
+  }
+}

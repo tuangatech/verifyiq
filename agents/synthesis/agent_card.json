@@ -1,0 +1,21 @@
+{
+  "name": "Risk Synthesis Agent",
+  "description": "Receives structured outcome bundles from data agents and produces a risk decision (approve / review / decline) with decision factors and reasoning.",
+  "url": "http://synthesis:8004",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "risk_synthesis",
+      "name": "Risk Synthesis",
+      "description": "Given structured outcomes from Equifax, Employment, and International agents, produces a VerificationDecision with approve/review/decline, confidence, risk score, and reasoning.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    }
+  ],
+  "auth_schemes": [],
+  "capabilities": {
+    "streaming": false,
+    "push_notifications": false,
+    "max_concurrent_tasks": 5
+  }
+}

@@ -1,0 +1,62 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+.venv
+venv/
+ENV/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+
+# Node (Next.js UI, Mortgage Platform)
+node_modules/
+.ui/node_modules/
+.mortgage-platform/node_modules/
+next/
+.next/
+out/
+output/
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Docker
+.docker/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# uv lock files (optional - uncomment if you want to ignore)
+# uv.lock

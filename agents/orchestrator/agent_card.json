@@ -1,0 +1,21 @@
+{
+  "name": "VerifyIQ Orchestrator",
+  "description": "Hub agent. Accepts verification requests, resolves agents via Registry, fans out to data agents, chains to Risk Synthesis, streams progress via SSE. Also acts as an A2A server for external orchestrators (e.g. Mortgage Platform).",
+  "url": "http://orchestrator:8000",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "verify_subject",
+      "name": "Subject Verification",
+      "description": "Accepts a verification request and returns a structured VerificationDecision by coordinating Equifax, Employment, International, and Risk Synthesis agents.",
+      "input_modes": ["application/json", "text/event-stream"],
+      "output_modes": ["application/json", "text/event-stream"]
+    }
+  ],
+  "auth_schemes": [],
+  "capabilities": {
+    "streaming": true,
+    "push_notifications": false,
+    "max_concurrent_tasks": 20
+  }
+}

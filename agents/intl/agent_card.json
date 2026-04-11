@@ -1,0 +1,35 @@
+{
+  "name": "Experian International Agent",
+  "description": "Simulates Experian International credit bureau. Returns foreign credit scores and country risk profiles. Returns unavailable when no foreign address history exists for the subject.",
+  "url": "http://intl:8003",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "international_credit_score",
+      "name": "International Credit Score",
+      "description": "Returns a US-equivalent credit score based on foreign bureau records. Returns unavailable when no foreign address history exists.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    },
+    {
+      "id": "country_risk_profile",
+      "name": "Country Risk Profile",
+      "description": "Returns a country risk tier (low, moderate, high, very_high) based on the subject's country of record.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    },
+    {
+      "id": "foreign_tradelines",
+      "name": "Foreign Tradelines",
+      "description": "Returns the count of foreign tradelines found for the subject.",
+      "input_modes": ["application/json"],
+      "output_modes": ["application/json"]
+    }
+  ],
+  "auth_schemes": [],
+  "capabilities": {
+    "streaming": false,
+    "push_notifications": false,
+    "max_concurrent_tasks": 10
+  }
+}
