@@ -443,12 +443,13 @@ Run every item. All must pass before starting Phase 2.
 - [ ] `docker --version` prints a version
 - [ ] `docker compose version` prints a version
 - [ ] `node --version` prints `v20.x.x` or higher
-- [ ] `python3 --version` prints `3.11.x` or `3.12.x`
+- [ ] `python --version` prints `3.11.x` or `3.12.x`
 - [ ] `uv --version` prints a version
 - [ ] `sqlite3 --version` prints a version
 
 **OpenRouter:**
 - [ ] `curl https://openrouter.ai/api/v1/models -H "Authorization: Bearer $(grep OPENROUTER_API_KEY .env | cut -d= -f2)"` returns a JSON array (not an error)
+  *(Windows: use `findstr` or extract the key manually — the `$(...)` subshell syntax requires Git Bash or WSL)*
 - [ ] OpenRouter dashboard shows credit balance > $0
 
 **Repository:**
@@ -456,12 +457,10 @@ Run every item. All must pass before starting Phase 2.
 - [ ] `cat .gitignore | grep "^\*\.db"` prints `*.db`
 - [ ] `.env` exists and contains your real API key (not the placeholder)
 - [ ] `.env.example` is committed: `git log --oneline | head -3` shows a commit
-- [ ] `python3 -c "import sys; sys.path.insert(0,'.'"); from agents.shared.schemas import EquifaxArtifact; print('ok')"` prints `ok`
-- [ ] `python3 -c "import sys; sys.path.insert(0,'.'); from agents.shared.a2a_types import A2ATask, AgentError, AgentOutcome; print('ok')"` prints `ok`
 
 **Containers:**
 - [ ] `docker compose ps` shows all 6 containers with status `running` or `Up`
-- [ ] `curl -s http://localhost:8099/health | python3 -m json.tool` returns `{"status": "healthy", ...}`
+- [ ] `curl -s http://localhost:8099/health | python -m json.tool` returns `{"status": "healthy", ...}`
 - [ ] `curl -s http://localhost:8000/health` returns 200
 - [ ] `curl -s http://localhost:8001/health` returns 200
 - [ ] `curl -s http://localhost:8002/health` returns 200
@@ -469,7 +468,7 @@ Run every item. All must pass before starting Phase 2.
 - [ ] `curl -s http://localhost:8004/health` returns 200
 
 **Agent Cards:**
-- [ ] `curl -s http://localhost:8001/.well-known/agent.json | python3 -m json.tool` returns valid JSON with a `skills` array containing 4 items
+- [ ] `curl -s http://localhost:8001/.well-known/agent.json | python -m json.tool` returns valid JSON with a `skills` array containing 4 items
 - [ ] `curl -s http://localhost:8002/.well-known/agent.json` — skills array contains 3 items
 - [ ] `curl -s http://localhost:8003/.well-known/agent.json` — skills array contains 3 items
 - [ ] `curl -s http://localhost:8004/.well-known/agent.json` — skills array contains 1 item (`risk_synthesis`)
