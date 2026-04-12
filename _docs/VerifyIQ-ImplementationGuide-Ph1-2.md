@@ -342,19 +342,31 @@ Pin to specific versions for reproducibility. Suggested baseline: `fastapi==0.11
 **Pattern for all Python agents** (`agents/{name}/Dockerfile`):
 
 ```
-Base image: python:3.11-slim
+Base image: python:3.11-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 Working directory: /app
 Copy agents/shared/ to /app/agents/shared/    ← shared Pydantic types available to all agents
 Copy agents/{name}/requirements.txt to /app/
 RUN pip install --no-cache-dir -r requirements.txt
 Copy agents/{name}/ to /app/
 EXPOSE {port}
-CMD uvicorn main:app --host 0.0.0.0 --port {port}
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "{port}"]
 ```
+
+> ⚠️ **Note for orchestrator only** — because `resolver.py` is a sub-module, orchestrator uses a package structure instead of a flat `main.py`:
+> - `agents/orchestrator/__init__.py` — contains the `FastAPI` app (`app`) and all routes
+> - `agents/orchestrator/__main__.py` — thin entrypoint: `import uvicorn; uvicorn.run(app, host="0.0.0.0", port=8000)`
+> - `agents/orchestrator/resolver.py` — the `AgentResolver` class
+> - `COPY agents/orchestrator/ /app/orchestrator/` (not `/app/`)
+> - `CMD ["python", "-m", "orchestrator"]`
+>
+> The orchestrator also needs `agents/orchestrator/__init__.py` (can be empty — marks the directory as a Python package). Without it, Python cannot resolve `from .resolver import ...`.
 
 Ports: registry=8099, orchestrator=8000, equifax=8001, employment=8002, intl=8003, synthesis=8004.
 
 The `COPY agents/shared` step must come before the `pip install` step — shared types are needed at runtime, not at build time.
+
+> ⚠️ **Note:** The `curl` installation is required for Docker healthchecks (`curl -f http://localhost:{port}/health`). The `python:slim-bookworm` image does not include `curl` by default.
 
 ---
 
@@ -378,16 +390,17 @@ All six agents get a skeleton `main.py` in Phase 1. They serve only two endpoint
 - GET /agents → return [] (empty list — no persistence yet, full implementation in Phase 2)
 ```
 
-**`agents/orchestrator/main.py`** — Phase 1 stub:
+**`agents/orchestrator/`** — Phase 1 stub uses the package structure (see Step 1.13 note):
 
 ```
-- Load agent_card.json
+- agents/orchestrator/__init__.py — FastAPI app + routes (same as main.py above)
+- agents/orchestrator/__main__.py — uvicorn entrypoint
 - GET /.well-known/agent.json → return card
 - GET /health → { "status": "healthy", "agent": "orchestrator", "port": 8000 }
 - GET /agents → return [] (stub — will proxy Registry in Phase 2)
 ```
 
-The `sys.path` must include `/app` so agents can import from `agents.shared`. Add `sys.path.insert(0, "/app")` at the top of each `main.py`.
+The `sys.path` must include `/app` so agents can import from `agents.shared`. Add `sys.path.insert(0, "/app")` at the top of each `__init__.py`.
 
 ---
 
