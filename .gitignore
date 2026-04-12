@@ -19,6 +19,7 @@ ENV/
 .ruff_cache/
 .pytest_cache/
 .hypothesis/
+.claude/
 
 # Node (Next.js UI, Mortgage Platform)
 node_modules/
