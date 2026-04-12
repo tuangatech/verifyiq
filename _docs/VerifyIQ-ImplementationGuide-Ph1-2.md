@@ -720,16 +720,30 @@ Expected: `1 agent(s) for credit_score`. If you see 2, the `INSERT OR REPLACE` l
 
 ### Step 2.10 — Inspect the Registry Database Directly
 
+The `sqlite3` CLI is not installed in the container. Use Python instead:
+
 ```bash
-$ docker compose exec registry sqlite3 /data/registry.db \
-    "SELECT name, health, registered_at FROM registered_agents;"
+$ docker compose exec registry python -c "
+import sqlite3
+conn = sqlite3.connect('/data/registry.db')
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+cur.execute('SELECT name, health, registered_at FROM registered_agents')
+for row in cur.fetchall():
+    print(dict(row))
+"
 ```
 
 Expected: 5 rows, all with `health = healthy`.
 
 ```bash
-$ docker compose exec registry sqlite3 /data/registry.db \
-    "SELECT name, skills FROM registered_agents WHERE skills LIKE '%credit_score%';"
+$ docker compose exec registry python -c "
+import sqlite3
+conn = sqlite3.connect('/data/registry.db')
+cur = conn.cursor()
+cur.execute(\"SELECT name, skills FROM registered_agents WHERE skills LIKE '%credit_score%'\")
+print(cur.fetchall())
+"
 ```
 
 Expected: 1 row — the Equifax Agent.
