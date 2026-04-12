@@ -8,18 +8,22 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from agents.shared.registry_client import register_with_registry, deregister_from_registry
+from .resolver import AgentResolver, NoCandidateAgentError
 
 agent_card_path = Path(__file__).parent / "agent_card.json"
 with open(agent_card_path) as f:
     AGENT_CARD = json.load(f)
 
 _url_hash: str | None = None
+resolver = AgentResolver()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _url_hash
-    _url_hash = await register_with_registry()
+    _url_hash = await register_with_registry(
+        str(Path(__file__).parent / "agent_card.json")
+    )
     yield
     await deregister_from_registry(_url_hash)
 
@@ -34,4 +38,18 @@ def agent_card():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "agent": "employment", "port": 8002}
+    return {"status": "healthy", "agent": "orchestrator", "port": 8000}
+
+
+@app.get("/agents")
+async def list_agents():
+    return await resolver.list_all()
+
+
+@app.get("/resolve/{skill}")
+async def resolve_skill(skill: str):
+    try:
+        url = await resolver.find(skill)
+        return {"skill": skill, "url": url}
+    except NoCandidateAgentError as e:
+        return {"skill": skill, "error": str(e)}
