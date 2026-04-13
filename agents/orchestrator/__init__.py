@@ -1,3 +1,4 @@
+# agents/orchestrator/__init__.py
 import sys
 sys.path.insert(0, "/app")
 
@@ -20,6 +21,7 @@ resolver = AgentResolver()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Register with the Registry on startup; deregister on graceful shutdown."""
     global _url_hash
     _url_hash = await register_with_registry(
         str(Path(__file__).parent / "agent_card.json")
@@ -33,6 +35,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/.well-known/agent.json")
 def agent_card():
+    """Serve the Agent Card for A2A discovery."""
     return AGENT_CARD
 
 
@@ -43,11 +46,13 @@ def health():
 
 @app.get("/agents")
 async def list_agents():
+    """Proxy the Registry's full agent list — used by the UI dashboard."""
     return await resolver.list_all()
 
 
 @app.get("/resolve/{skill}")
 async def resolve_skill(skill: str):
+    """Debug endpoint: resolve a skill to an agent URL; return error JSON on miss."""
     try:
         url = await resolver.find(skill)
         return {"skill": skill, "url": url}

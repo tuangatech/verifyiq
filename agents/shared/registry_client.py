@@ -1,3 +1,4 @@
+# agents/shared/registry_client.py
 """
 Async helper functions for agent self-registration and deregistration with the Registry.
 Kept in shared so no agent duplicates this logic.

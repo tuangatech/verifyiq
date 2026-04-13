@@ -1,3 +1,4 @@
+# agents/employment/main.py
 import sys
 sys.path.insert(0, "/app")
 
@@ -18,6 +19,7 @@ _url_hash: str | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Register with the Registry on startup; deregister on graceful shutdown."""
     global _url_hash
     _url_hash = await register_with_registry()
     yield
@@ -29,6 +31,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/.well-known/agent.json")
 def agent_card():
+    """Serve the Agent Card for A2A discovery."""
     return AGENT_CARD
 
 

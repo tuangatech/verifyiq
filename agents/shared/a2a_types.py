@@ -1,3 +1,4 @@
+# agents/shared/a2a_types.py
 """
 A2A protocol types used by agents and the Orchestrator for inter-agent communication.
 These flow across service boundaries — exact field names and types must be stable.

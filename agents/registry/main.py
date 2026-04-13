@@ -1,29 +1,30 @@
+# agents/registry/main.py
 import os
 import sqlite3
 import hashlib
 import json
 import sys
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 sys.path.insert(0, "/app")
 
 from fastapi import FastAPI, HTTPException, Query
-from contextlib import contextmanager
 
 from agents.shared.a2a_types import RegisterRequest, RegisteredAgent
-
-app = FastAPI()
 
 DB_PATH = os.getenv("DB_PATH", "/data/registry.db")
 
 
 def get_db():
+    """Return a new SQLite connection with row-factory for dict-like column access."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db() -> None:
+    """Create the registered_agents table if it doesn't exist."""
     with get_db() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS registered_agents (
@@ -46,12 +47,18 @@ def init_db() -> None:
 
 
 def make_url_hash(url: str) -> str:
+    """First 16 hex chars of SHA-256 of the URL — stable, deterministic primary key."""
     return hashlib.sha256(url.encode()).hexdigest()[:16]
 
 
-@app.on_event("startup")
-def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialise the DB on startup; nothing to tear down on shutdown."""
     init_db()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/health")
@@ -61,11 +68,12 @@ def health():
 
 @app.post("/register", status_code=201)
 def register(body: RegisterRequest):
+    """Upsert an agent row; returns url_hash so the caller can deregister later."""
     url_hash = make_url_hash(body.url)
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as conn:
-        cur = conn.execute(
+        conn.execute(
             """
             INSERT OR REPLACE INTO registered_agents
                 (url_hash, name, url, skills, version, auth_schemes,
@@ -95,6 +103,7 @@ def register(body: RegisterRequest):
 
 @app.get("/agents", response_model=list[RegisteredAgent])
 def list_agents(skill: str | None = Query(None)):
+    """Return all agents, or only those whose skills JSON contains the requested skill."""
     with get_db() as conn:
         if skill:
             cur = conn.execute(
@@ -125,6 +134,7 @@ def list_agents(skill: str | None = Query(None)):
 
 @app.delete("/agents/{url_hash}")
 def deregister(url_hash: str):
+    """Remove an agent by url_hash; 404 if not found."""
     with get_db() as conn:
         cur = conn.execute(
             "DELETE FROM registered_agents WHERE url_hash = ?",

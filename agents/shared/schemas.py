@@ -1,3 +1,4 @@
+# agents/shared/schemas.py
 """
 Shared Pydantic artifact models used across all agents.
 These are the domain-level contracts — every agent that produces or consumes
