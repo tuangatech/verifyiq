@@ -1,3 +1,4 @@
+# tests/test_phase2_registry.py
 """
 Phase 2 integration tests — Agent Registry, self-registration, AgentResolver.
 
@@ -172,7 +173,8 @@ async def test_registry_persists_across_restart(registry_client: httpx.AsyncClie
 
 async def test_orchestrator_proxies_registry(orchestrator_client: httpx.AsyncClient):
     """GET /agents on orchestrator returns the same agent list as the Registry."""
-    reg_resp = await httpx.AsyncClient(base_url=REGISTRY_URL, timeout=10).get("/agents")
+    async with httpx.AsyncClient(base_url=REGISTRY_URL, timeout=10.0) as client:
+        reg_resp = await client.get("/agents")
     orch_resp = await orchestrator_client.get("/agents")
 
     assert orch_resp.status_code == 200
