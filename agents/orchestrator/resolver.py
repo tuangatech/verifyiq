@@ -17,14 +17,22 @@ class AgentResolver:
         self.registry_url = os.getenv("AGENT_REGISTRY_URL", "http://registry:8099")
 
     async def find(self, skill: str) -> str:
-        """Query Registry, filter to healthy/unknown agents, return the lowest-latency URL."""
+        """Query Registry for agents that advertise the given skill, then return the
+        URL of the healthiest, lowest-latency candidate.
+
+        Skill matching is exact (case-sensitive) — the Registry does a JSON substring
+        match: WHERE skills LIKE '%"<skill>"%'. Pass the skill name verbatim as
+        declared in each agent's Agent Card (e.g. "credit_score", not "Credit_Score").
+        """
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
                 f"{self.registry_url}/agents", params={"skill": skill}
             )
             response.raise_for_status()
-            agents = response.json()
+            agents = response.json()  # Registry has already filtered to skill matches
 
+        # Exclude agents the Registry has marked as unhealthy (e.g. failed health check)
+        # "unknown" is accepted — newly registered agents haven't been probed yet
         candidates = [
             a for a in agents if a.get("health") in ("healthy", "unknown")
         ]
