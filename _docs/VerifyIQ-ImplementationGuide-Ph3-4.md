@@ -1,6 +1,6 @@
 # VerifyIQ — Implementation Guide
 ## Phases 3 and 4
-*Companion to Project Specification v1.6*
+*Companion to Project Specification v1.7*
 
 ---
 
@@ -339,17 +339,17 @@ Instantiate `dispatcher = TaskDispatcher()` at module level alongside `resolver`
 
 ---
 
-### Step 3.7 — Rebuild and Start
+### Step 3.7 — Rebuild and Start (------- RESUME next time -------)
 
 ```bash
 $ docker compose down
 $ docker compose up --build
 ```
 
-Watch for both log lines on the Orchestrator:
+Watch for both log lines across the Registry and Orchestrator containers:
 ```
-verifyiq-orchestrator-1 | [Registry] Database initialised at /data/verifyiq.db
-verifyiq-orchestrator-1 | [Registry Client] Registered successfully — url_hash: ...
+registry-1       | [Registry] Database initialised at /data/registry.db
+orchestrator-1  | [Registry Client] Registered successfully — url_hash: ...
 ```
 
 ---
@@ -412,7 +412,7 @@ def _task(skill: str, subject_id: str = "test-S001", extra_input: dict | None = 
 ### Step 3.9 — Install Dependencies and Run Tests
 
 ```bash
-$ pip install pytest pytest-asyncio httpx
+$ pip install -r tests/requirements.txt
 $ pytest tests/test_phase3_a2a.py -v
 ```
 
@@ -458,11 +458,21 @@ $ curl -s http://localhost:8000/verify/TASK_ID | python3 -m json.tool
 $ curl -s http://localhost:8000/verify/TASK_ID/tasks | python3 -m json.tool
 # Expect: 1 row, agent_name "equifax", correlation_id matching the one from POST /verify
 
-# Inspect SQLite directly
-$ docker compose exec orchestrator sqlite3 /data/verifyiq.db \
-    "SELECT id, status, correlation_id, created_at, completed_at FROM verification_requests;"
-$ docker compose exec orchestrator sqlite3 /data/verifyiq.db \
-    "SELECT id, agent_name, status, correlation_id, started_at, ended_at FROM agent_tasks;"
+# Inspect SQLite directly (Python is available; sqlite3 CLI is not installed)
+$ docker compose exec orchestrator python -c "
+import sqlite3
+conn = sqlite3.connect('/data/verifyiq.db')
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+print('=== verification_requests ===')
+cur.execute('SELECT task_id, status, correlation_id, created_at, completed_at FROM verification_requests')
+for row in cur.fetchall():
+    print(dict(row))
+print('=== agent_tasks ===')
+cur.execute('SELECT id, agent_name, status, correlation_id, started_at, ended_at FROM agent_tasks')
+for row in cur.fetchall():
+    print(dict(row))
+"
 ```
 
 ---
@@ -489,7 +499,7 @@ $ git commit -m "Phase 3: A2A task protocol, stub artifacts, TaskManager, POST /
 - [ ] Polling `GET /verify/{task_id}` reaches `"status": "completed"` within 5 seconds
 - [ ] `GET /verify/{task_id}/tasks` returns 1 row with `agent_name: "equifax"` and non-empty `correlation_id`
 - [ ] `correlation_id` in `verification_requests` SQLite row matches `correlation_id` in the `agent_tasks` row
-- [ ] `docker compose exec orchestrator sqlite3 /data/verifyiq.db "SELECT count(*) FROM agent_tasks;"` returns ≥ 1
+- [ ] `docker compose exec orchestrator python -c "import sqlite3; conn=sqlite3.connect('/data/verifyiq.db'); print(conn.execute('SELECT count(*) FROM agent_tasks').fetchone()[0])"` returns ≥ 1
 - [ ] `pytest tests/test_phase3_a2a.py -v` — all 10 tests pass
 - [ ] `git log --oneline | head -2` shows Phase 3 commit on top
 
@@ -930,5 +940,5 @@ $ git commit -m "Phase 4: LLM artifact generation, prompts, validation retry"
 
 ---
 
-*Document: VerifyIQ Implementation Guide | Phases 3–4 | Companion to Spec v1.6*
+*Document: VerifyIQ Implementation Guide | Phases 3–4 | Companion to Spec v1.7*
 *Next: Phase 5 — Orchestration Patterns*

@@ -1,6 +1,6 @@
 # VerifyIQ — Implementation Guide
 ## Phases 1 and 2
-*Companion to Project Specification v1.6*
+*Companion to Project Specification v1.7*
 
 ---
 
@@ -39,20 +39,7 @@ Both must print a version number. If `docker compose version` fails, you have an
 
 ---
 
-### Step 1.2 — Install Node.js 20
-
-```bash
-$ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-$ source ~/.bashrc          # or ~/.zshrc on macOS
-$ nvm install 20
-$ nvm use 20
-$ node --version            # expect v20.x.x
-$ npm --version             # expect 10.x.x
-```
-
----
-
-### Step 1.3 — Install Python 3.11+
+### Step 1.2 — Install Python 3.11+
 
 ```bash
 $ python3 --version         # expect 3.11.x or 3.12.x
@@ -62,7 +49,7 @@ If you need to install: `brew install python@3.11` on macOS, or use [pyenv](http
 
 ---
 
-### Step 1.4 — Install `uv`
+### Step 1.3 — Install `uv`
 
 ```bash
 $ pip install uv
@@ -71,7 +58,7 @@ $ uv --version
 
 ---
 
-### Step 1.5 — Install SQLite CLI
+### Step 1.4 — Install SQLite CLI
 
 ```bash
 $ sqlite3 --version         # usually pre-installed on macOS/Linux
@@ -81,7 +68,7 @@ If missing: `brew install sqlite` (macOS) or `sudo apt-get install sqlite3` (Lin
 
 ---
 
-### Step 1.6 — Create OpenRouter Account and Verify API Key
+### Step 1.5 — Create OpenRouter Account and Verify API Key
 
 1. Sign up at [https://openrouter.ai](https://openrouter.ai)
 2. Navigate to **Keys → Create Key** → name it `verifyiq-dev`
@@ -99,7 +86,7 @@ Expected: a JSON array of model objects. If you see `{"error": ...}` the key is 
 
 ---
 
-### Step 1.7 — Initialise the Repository
+### Step 1.6 — Initialise the Repository
 
 ```bash
 $ mkdir verifyiq && cd verifyiq
@@ -116,7 +103,6 @@ $ mkdir -p agents/equifax
 $ mkdir -p agents/employment
 $ mkdir -p agents/intl
 $ mkdir -p agents/synthesis
-$ mkdir -p ui/app
 $ mkdir -p tests
 ```
 
@@ -140,17 +126,17 @@ agents/synthesis
 
 ---
 
-### Step 1.8 — Create `.gitignore`
+### Step 1.7 — Create `.gitignore`
 
 **File:** `.gitignore`
 
 **Purpose:** Prevent secrets, compiled files, and generated artefacts from being committed.
 
-**Must exclude:** `.env`, `*.db`, `__pycache__/`, `*.pyc`, `.venv/`, `node_modules/`, `.next/`, `dist/`
+**Must exclude:** `.env`, `*.db`, `__pycache__/`, `*.pyc`, `.venv/`, `dist/`
 
 ---
 
-### Step 1.9 — Create `.env.example` and `.env`
+### Step 1.8 — Create `.env.example` and `.env`
 
 **File:** `.env.example`
 
@@ -176,7 +162,7 @@ Open `.env` and replace the API key placeholder with your real `sk-or-v1-...` ke
 
 ---
 
-### Step 1.10 — Create Shared Pydantic Schemas
+### Step 1.9 — Create Shared Pydantic Schemas
 
 **File:** `agents/shared/__init__.py`
 
@@ -242,7 +228,7 @@ Both functions read `AGENT_REGISTRY_URL` from the environment at call time, not 
 
 ---
 
-### Step 1.11 — Create Agent Card JSON Files
+### Step 1.10 — Create Agent Card JSON Files
 
 Six static JSON files. Each is the formal contract advertised by that agent. The `url` field uses the Docker Compose service name (e.g. `http://equifax:8001`) — this resolves correctly inside the Docker network.
 
@@ -310,7 +296,7 @@ The Registry has no Agent Card — it is plain infrastructure, not an A2A agent.
 
 ---
 
-### Step 1.12 — Create `requirements.txt` for Each Agent
+### Step 1.11 — Create `requirements.txt` for Each Agent
 
 Each agent has its own `requirements.txt`. Dependencies are repeated across agents intentionally — each service is independently deployable.
 
@@ -337,7 +323,7 @@ Pin to specific versions for reproducibility. Suggested baseline: `fastapi==0.11
 
 ---
 
-### Step 1.13 — Create Dockerfiles
+### Step 1.12 — Create Dockerfiles
 
 **Pattern for all Python agents** (`agents/{name}/Dockerfile`):
 
@@ -370,7 +356,7 @@ The `COPY agents/shared` step must come before the `pip install` step — shared
 
 ---
 
-### Step 1.14 — Create Skeleton `main.py` for Each Agent
+### Step 1.13 — Create Skeleton `main.py` for Each Agent
 
 All six agents get a skeleton `main.py` in Phase 1. They serve only two endpoints: `GET /.well-known/agent.json` and `GET /health`. No lifespan hooks yet (those come in Phase 2). No database, no LLM, no task protocol.
 
@@ -404,13 +390,13 @@ The `sys.path` must include `/app` so agents can import from `agents.shared`. Ad
 
 ---
 
-### Step 1.15 — Create `docker-compose.yml`
+### Step 1.14 — Create `docker-compose.yml`
 
 **File:** `docker-compose.yml` at repo root.
 
 **What it must define:**
 
-Six services: `registry`, `orchestrator`, `equifax`, `employment`, `intl`, `synthesis`. (The `ui` service and `mortgage-platform` are added in later phases.)
+Six services: `registry`, `orchestrator`, `equifax`, `employment`, `intl`, `synthesis`. (The `mortgage-platform` service is added in Phase 9.)
 
 **For each service:**
 - `build.context: .` and `build.dockerfile: agents/{name}/Dockerfile`
@@ -438,7 +424,7 @@ These two volumes must be declared at the bottom of the file under `volumes:`.
 
 ---
 
-### Step 1.16 — Build and Start
+### Step 1.15 — Build and Start
 
 ```bash
 $ docker compose up --build
@@ -455,7 +441,6 @@ Run every item. All must pass before starting Phase 2.
 **Tools:**
 - [ ] `docker --version` prints a version
 - [ ] `docker compose version` prints a version
-- [ ] `node --version` prints `v20.x.x` or higher
 - [ ] `python --version` prints `3.11.x` or `3.12.x`
 - [ ] `uv --version` prints a version
 - [ ] `sqlite3 --version` prints a version
@@ -781,5 +766,5 @@ $ git commit -m "Phase 2: Agent Registry with SQLite, self-registration, AgentRe
 
 ---
 
-*Document: VerifyIQ Implementation Guide | Phases 1–2 | Companion to Spec v1.6*
+*Document: VerifyIQ Implementation Guide | Phases 1–2 | Companion to Spec v1.7*
 *Next: Phase 3 — A2A Task Protocol*

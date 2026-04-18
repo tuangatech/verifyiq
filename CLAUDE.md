@@ -15,7 +15,7 @@ Orchestrator (:8000)       ← ADK + FastAPI hub
 Agent Registry (:8099)     ← FastAPI; self-registration + skill discovery
         ▲ POST /register on startup
 Equifax (:8001) · Employment (:8002) · Intl (:8003) · Synthesis (:8004)
-Next.js UI (:3000)         ← App Router, Tailwind, shadcn/ui, EventSource (SSE)
+CLI (host)                 ← typer + rich; calls Orchestrator HTTP/SSE
 ```
 
 All inter-agent comms: `POST /tasks/send`. No shared DBs, no cross-service imports.
@@ -24,7 +24,7 @@ All inter-agent comms: `POST /tasks/send`. No shared DBs, no cross-service impor
 
 | Layer | Tech |
 |---|---|
-| Frontend | Next.js 14 App Router, Tailwind, shadcn/ui |
+| CLI | Python + typer + rich + httpx |
 | Orchestrator | Python + FastAPI + ADK |
 | Data agents | Python + FastAPI (Employment: LangGraph) |
 | LLM routing | OpenRouter — `google/gemini-3-flash` (agents), `openai/gpt-5.4-mini` (synthesis) |
@@ -39,7 +39,7 @@ agents/
   shared/         # schemas.py (artifacts), a2a_types.py (protocol types)
   orchestrator/   # :8000  registry/   # :8099
   equifax/        # :8001  employment/ # :8002  intl/ # :8003  synthesis/ # :8004
-ui/               # Next.js
+cli/              # Python CLI (typer + rich); VERIFYIQ_URL env var
 mortgage-platform/  # Phase 9 only
 docker-compose.yml · .env.example
 ```
@@ -113,9 +113,12 @@ Write tests **before** moving to the next phase.
 ## Coding Standards
 
 - Type-annotate all signatures. Pydantic at all service boundaries — no raw `dict` passing.
+- Every file starts with `# <relative-path>` (e.g. `# agents/equifax/main.py`).
+- Every function/method gets a 1–2 line docstring. No novel-length descriptions.
+- Complex logic (branching, retries, non-obvious flows) gets inline `#` comments. Obvious code does not.
 - `structlog` JSON logging: every event includes `correlation_id`, `task_id`, `agent`, `duration_ms`.
 - `asyncio.gather` for fan-out. `httpx.AsyncClient` for all outbound HTTP.
-- Next.js: server components by default. Native `EventSource` for SSE. `fetch` not Axios.
+- CLI: no path dependency on `agents/shared/`; lightweight response models in `cli/verifyiq_cli/models.py`.
 - No auth between agents until Phase 8.
 
 ---
@@ -130,7 +133,7 @@ Write tests **before** moving to the next phase.
 | 4 | LLM artifact generation — OpenRouter calls, Pydantic validation, retry |
 | 5 | Orchestration patterns — fan-out, timeouts, retries, optional agents, sequential chain |
 | 6 | LangGraph Employment Agent + SSE streaming |
-| 7 | Next.js frontend — form, live report, agent dashboard, history |
+| 7 | CLI — `verifyiq run/agents/history/inspect`; new Orchestrator endpoints |
 | 8 | Auth + polish (stretch) |
 | 9 | ADK server-side + Mortgage Platform UC-5 (stretch) |
 
