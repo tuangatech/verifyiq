@@ -21,12 +21,7 @@ ENV/
 .hypothesis/
 .claude/
 
-# Node (Next.js UI, Mortgage Platform)
-node_modules/
-.ui/node_modules/
-.mortgage-platform/node_modules/
-next/
-.next/
+# Build output
 out/
 output/
 
