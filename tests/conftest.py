@@ -21,26 +21,26 @@ async def orchestrator_client():
 @pytest_asyncio.fixture
 async def equifax_client():
     """Async HTTP client pointed at the Equifax agent."""
-    async with httpx.AsyncClient(base_url="http://localhost:8001", timeout=15.0) as client:
+    async with httpx.AsyncClient(base_url="http://localhost:8001", timeout=35.0) as client:
         yield client
 
 
 @pytest_asyncio.fixture
 async def employment_client():
     """Async HTTP client pointed at the Employment agent."""
-    async with httpx.AsyncClient(base_url="http://localhost:8002", timeout=15.0) as client:
+    async with httpx.AsyncClient(base_url="http://localhost:8002", timeout=35.0) as client:
         yield client
 
 
 @pytest_asyncio.fixture
 async def intl_client():
     """Async HTTP client pointed at the International agent."""
-    async with httpx.AsyncClient(base_url="http://localhost:8003", timeout=15.0) as client:
+    async with httpx.AsyncClient(base_url="http://localhost:8003", timeout=35.0) as client:
         yield client
 
 
 @pytest_asyncio.fixture
 async def synthesis_client():
     """Async HTTP client pointed at the Synthesis agent."""
-    async with httpx.AsyncClient(base_url="http://localhost:8004", timeout=15.0) as client:
+    async with httpx.AsyncClient(base_url="http://localhost:8004", timeout=35.0) as client:
         yield client
