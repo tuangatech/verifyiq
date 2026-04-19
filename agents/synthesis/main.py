@@ -9,8 +9,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
-from agents.shared.a2a_types import A2ATask, A2ATaskResult
+from agents.shared.a2a_types import A2ATask, A2ATaskResult, AgentError
 from agents.shared.registry_client import register_with_registry, deregister_from_registry
+from agents.synthesis.tools import (
+    parse_outcome_bundle,
+    call_llm_decision,
+    validate_decision_artifact,
+    retry_with_correction,
+)
 
 agent_card_path = Path(__file__).parent / "agent_card.json"
 with open(agent_card_path) as f:
@@ -45,28 +51,54 @@ def health():
 
 @app.post("/tasks/send")
 async def tasks_send(task: A2ATask) -> A2ATaskResult:
-    """Accept an A2A task and return a stub risk decision artifact. Replaced by LLM in Phase 4."""
+    """Accept an A2A task, call LLM to produce a risk decision, validate, and return."""
     started_at = datetime.now(timezone.utc).isoformat()
-    artifact = {
-        "decision": "approve",
-        "confidence": "high",
-        "risk_score": 22,
-        "decision_factors": [
-            "Strong credit score (720)",
-            "Stable employment",
-            "Low utilization (32%)",
-        ],
-        "risk_flags": [],
-        "international_note": None,
-        "recommended_actions": [],
-        "reasoning_summary": "Stub synthesis — Phase 3. Replace with LLM in Phase 4.",
-    }
+
+    try:
+        outcomes, use_case = parse_outcome_bundle(task.input)
+    except ValueError as e:
+        ended_at = datetime.now(timezone.utc).isoformat()
+        result = A2ATaskResult(
+            task_id=task.task_id,
+            correlation_id=task.correlation_id,
+            status="failed",
+            artifact=None,
+            error=AgentError(code="INVALID_INPUT", message=str(e), retryable=False),
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+        task_store[task.task_id] = result.model_dump()
+        return result
+
+    raw = await call_llm_decision(outcomes, use_case)
+    try:
+        artifact = validate_decision_artifact(raw)
+    except Exception as e:
+        raw = await retry_with_correction(raw, str(e), outcomes, use_case)
+        try:
+            artifact = validate_decision_artifact(raw)
+        except Exception as e2:
+            ended_at = datetime.now(timezone.utc).isoformat()
+            result = A2ATaskResult(
+                task_id=task.task_id,
+                correlation_id=task.correlation_id,
+                status="failed",
+                artifact=None,
+                error=AgentError(
+                    code="LLM_VALIDATION_FAILED", message=str(e2), retryable=False
+                ),
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+            task_store[task.task_id] = result.model_dump()
+            return result
+
     ended_at = datetime.now(timezone.utc).isoformat()
     result = A2ATaskResult(
         task_id=task.task_id,
         correlation_id=task.correlation_id,
         status="completed",
-        artifact=artifact,
+        artifact=artifact.model_dump(mode="json"),
         error=None,
         started_at=started_at,
         ended_at=ended_at,
