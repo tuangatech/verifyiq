@@ -9,8 +9,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
-from agents.shared.a2a_types import A2ATask, A2ATaskResult
+from agents.shared.a2a_types import A2ATask, A2ATaskResult, AgentError
 from agents.shared.registry_client import register_with_registry, deregister_from_registry
+from agents.equifax.tools import (
+    build_persona_seed,
+    call_llm_credit_profile,
+    validate_credit_artifact,
+    retry_with_correction,
+)
 
 agent_card_path = Path(__file__).parent / "agent_card.json"
 with open(agent_card_path) as f:
@@ -45,26 +51,39 @@ def health():
 
 @app.post("/tasks/send")
 async def tasks_send(task: A2ATask) -> A2ATaskResult:
-    """Accept an A2A task and return a stub credit report artifact. Replaced by LLM in Phase 4."""
+    """Accept an A2A task, call LLM to generate a credit profile, validate, and return."""
     started_at = datetime.now(timezone.utc).isoformat()
-    artifact = {
-        "source": "equifax",
-        "subject_id": task.input.get("subject_id", "stub"),
-        "credit_score": 720,
-        "score_model": "FICO 8",
-        "open_accounts": 5,
-        "credit_utilization_pct": 32.0,
-        "derogatory_marks": 0,
-        "hard_inquiries_12mo": 2,
-        "oldest_account_years": 7.5,
-        "data_as_of": "2026-04-12",
-    }
+    seed = build_persona_seed(task.input)
+
+    raw = await call_llm_credit_profile(seed)
+    try:
+        artifact = validate_credit_artifact(raw)
+    except Exception as e:
+        raw = await retry_with_correction(raw, str(e), seed)
+        try:
+            artifact = validate_credit_artifact(raw)
+        except Exception as e2:
+            ended_at = datetime.now(timezone.utc).isoformat()
+            result = A2ATaskResult(
+                task_id=task.task_id,
+                correlation_id=task.correlation_id,
+                status="failed",
+                artifact=None,
+                error=AgentError(
+                    code="LLM_VALIDATION_FAILED", message=str(e2), retryable=False
+                ),
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+            task_store[task.task_id] = result.model_dump()
+            return result
+
     ended_at = datetime.now(timezone.utc).isoformat()
     result = A2ATaskResult(
         task_id=task.task_id,
         correlation_id=task.correlation_id,
         status="completed",
-        artifact=artifact,
+        artifact=artifact.model_dump(mode="json"),
         error=None,
         started_at=started_at,
         ended_at=ended_at,
