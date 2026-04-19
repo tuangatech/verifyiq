@@ -9,8 +9,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
-from agents.shared.a2a_types import A2ATask, A2ATaskResult
+from agents.shared.a2a_types import A2ATask, A2ATaskResult, AgentError
 from agents.shared.registry_client import register_with_registry, deregister_from_registry
+from agents.employment.tools import (
+    build_employment_seed,
+    call_llm_employment_profile,
+    validate_employment_artifact,
+    retry_with_correction,
+)
 
 agent_card_path = Path(__file__).parent / "agent_card.json"
 with open(agent_card_path) as f:
@@ -45,27 +51,39 @@ def health():
 
 @app.post("/tasks/send")
 async def tasks_send(task: A2ATask) -> A2ATaskResult:
-    """Accept an A2A task and return a stub employment artifact. Replaced by LLM in Phase 4."""
+    """Accept an A2A task, call LLM to generate employment verification, validate, and return."""
     started_at = datetime.now(timezone.utc).isoformat()
-    artifact = {
-        "source": "workforce_solutions",
-        "subject_id": task.input.get("subject_id", "stub"),
-        "currently_employed": True,
-        "employer_name": "Stub Corporation Inc.",
-        "employment_start_date": "2020-01-15",
-        "tenure_years": 6.2,
-        "employment_type": "full_time",
-        "verified_annual_income": 85000,
-        "income_currency": "USD",
-        "verification_confidence": "high",
-        "data_as_of": "2026-04-12",
-    }
+    seed = build_employment_seed(task.input)
+
+    raw = await call_llm_employment_profile(seed)
+    try:
+        artifact = validate_employment_artifact(raw)
+    except Exception as e:
+        raw = await retry_with_correction(raw, str(e), seed)
+        try:
+            artifact = validate_employment_artifact(raw)
+        except Exception as e2:
+            ended_at = datetime.now(timezone.utc).isoformat()
+            result = A2ATaskResult(
+                task_id=task.task_id,
+                correlation_id=task.correlation_id,
+                status="failed",
+                artifact=None,
+                error=AgentError(
+                    code="LLM_VALIDATION_FAILED", message=str(e2), retryable=False
+                ),
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+            task_store[task.task_id] = result.model_dump()
+            return result
+
     ended_at = datetime.now(timezone.utc).isoformat()
     result = A2ATaskResult(
         task_id=task.task_id,
         correlation_id=task.correlation_id,
         status="completed",
-        artifact=artifact,
+        artifact=artifact.model_dump(mode="json"),
         error=None,
         started_at=started_at,
         ended_at=ended_at,
