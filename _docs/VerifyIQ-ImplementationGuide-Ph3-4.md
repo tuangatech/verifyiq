@@ -339,7 +339,7 @@ Instantiate `dispatcher = TaskDispatcher()` at module level alongside `resolver`
 
 ---
 
-### Step 3.7 — Rebuild and Start (------- RESUME next time -------)
+### Step 3.7 — Rebuild and Start
 
 ```bash
 $ docker compose down
