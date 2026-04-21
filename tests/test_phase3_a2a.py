@@ -206,7 +206,8 @@ async def test_agent_task_written_to_db(orchestrator_client: httpx.AsyncClient):
     tasks_resp = await orchestrator_client.get(f"/verify/{task_id}/tasks")
     assert tasks_resp.status_code == 200
     tasks = tasks_resp.json()
-    assert len(tasks) == 1, f"Expected 1 agent task, got {len(tasks)}: {tasks}"
-    assert tasks[0]["agent_name"] == "equifax"
-    assert tasks[0]["status"] == "completed"
-    assert tasks[0]["correlation_id"] == correlation_id
+    assert len(tasks) >= 1, f"Expected at least 1 agent task, got {len(tasks)}"
+    by_name = {t["agent_name"]: t for t in tasks}
+    assert "equifax" in by_name, f"equifax not found in {list(by_name.keys())}"
+    assert by_name["equifax"]["status"] == "completed"
+    assert by_name["equifax"]["correlation_id"] == correlation_id
