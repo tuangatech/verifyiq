@@ -379,15 +379,15 @@ Quick smoke test before running the full suite:
 $ curl -s -X POST http://localhost:8000/verify \
     -H "Content-Type: application/json" \
     -d '{"subject_name":"Jane Doe","subject_id":"S001","use_case":"mortgage","has_foreign_addr":true,"consent":true}' \
-    | python3 -m json.tool
+    | python -m json.tool
 # Expect: task_id, correlation_id, stream_url
 
 # Poll until completion (replace TASK_ID)
-$ curl -s http://localhost:8000/verify/TASK_ID | python3 -m json.tool
+$ curl -s http://localhost:8000/verify/TASK_ID | python -m json.tool
 # Expect: status "completed", decision is one of approve/review/decline
 
 # Inspect all agent tasks
-$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python3 -m json.tool
+$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python -m json.tool
 # Expect: 4 rows — equifax, employment, intl, synthesis — all "completed"
 ```
 
@@ -400,18 +400,18 @@ $ curl -s http://localhost:8000/verify/TASK_ID/tasks | python3 -m json.tool
 $ curl -s -X POST http://localhost:8000/verify \
     -H "Content-Type: application/json" \
     -d '{"subject_name":"Bob Smith","subject_id":"S002","use_case":"rental","has_foreign_addr":false,"consent":true}' \
-    | python3 -m json.tool
+    | python -m json.tool
 # Wait for completion, then:
-$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python3 -m json.tool
+$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python -m json.tool
 # Expect: equifax=completed, employment=completed, intl=skipped, synthesis=completed
 
 # UC-4: hire — Equifax should be skipped
 $ curl -s -X POST http://localhost:8000/verify \
     -H "Content-Type: application/json" \
     -d '{"subject_name":"Carlos Rivera","subject_id":"S003","use_case":"hire","has_foreign_addr":true,"consent":true}' \
-    | python3 -m json.tool
+    | python -m json.tool
 # Wait for completion, then:
-$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python3 -m json.tool
+$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python -m json.tool
 # Expect: equifax=skipped, employment=completed, intl=completed, synthesis=completed
 ```
 
@@ -653,29 +653,29 @@ All Phase 3, Phase 4, and Phase 5 tests must pass.
 $ curl -s -X POST http://localhost:8000/verify \
     -H "Content-Type: application/json" \
     -d '{"subject_name":"Jane Doe","subject_id":"S001","use_case":"mortgage","has_foreign_addr":true,"consent":true}' \
-    | python3 -m json.tool
+    | python -m json.tool
 # Copy task_id, poll until completed
 
-$ curl -s http://localhost:8000/verify/TASK_ID | python3 -m json.tool
+$ curl -s http://localhost:8000/verify/TASK_ID | python -m json.tool
 # Expect: status=completed, decision=approve/review/decline
 
-$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python3 -m json.tool
+$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python -m json.tool
 # Expect: 4 rows (equifax, employment, intl, synthesis) all completed
 
 # UC-2: Rental — intl skipped
 $ curl -s -X POST http://localhost:8000/verify \
     -H "Content-Type: application/json" \
     -d '{"subject_name":"Bob Smith","subject_id":"S002","use_case":"rental","has_foreign_addr":false,"consent":true}' \
-    | python3 -m json.tool
+    | python -m json.tool
 # Poll, then check tasks:
-$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python3 -m json.tool
+$ curl -s http://localhost:8000/verify/TASK_ID/tasks | python -m json.tool
 # Expect: equifax=completed, employment=completed, intl=skipped, synthesis=completed
 
 # UC-4: Hire — equifax skipped
 $ curl -s -X POST http://localhost:8000/verify \
     -H "Content-Type: application/json" \
     -d '{"subject_name":"Carlos Rivera","subject_id":"S003","use_case":"hire","has_foreign_addr":true,"consent":true}' \
-    | python3 -m json.tool
+    | python -m json.tool
 # Expect: equifax=skipped, employment=completed, intl=completed, synthesis=completed
 
 # Inspect SQLite directly
@@ -714,7 +714,7 @@ $ curl -s -X POST http://localhost:8000/verify \
     -d '{"subject_name":"Test Retry","subject_id":"S999","use_case":"mortgage","has_foreign_addr":false,"consent":true}'
 
 # Wait, then check status
-$ curl -s http://localhost:8000/verify/TASK_ID | python3 -m json.tool
+$ curl -s http://localhost:8000/verify/TASK_ID | python -m json.tool
 # Expect: status "failed" (equifax is required, connection error after retry)
 
 # Check orchestrator logs for retry evidence

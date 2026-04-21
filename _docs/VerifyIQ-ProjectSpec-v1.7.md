@@ -1164,7 +1164,10 @@ The problem is what it costs at the organizational boundary. A hardwired Orchest
 
 In a domain where each "agent" represents a separate organization (Equifax, The Work Number, Experian International), a hardwired workflow is not an architectural option — it would require merging all organizations' code into one deployable. A2A exists precisely to replace this coupling with a protocol contract.
 
-Within VerifyIQ, the Orchestrator does execute a fixed DAG — the order of operations is deterministic per use case type. But the *which agent executes each step* is resolved at runtime via the Registry. The workflow structure is hardwired; the agent identities are not.
+Within VerifyIQ, the Orchestrator does execute a fixed DAG — the order of operations is deterministic per use case type. But the *which agent executes each step* is resolved at runtime via the Registry. The workflow structure is hardwired; the agent identities are not. Concretely, two layers are separated:
+
+1. **Which skills a use case needs** — hardcoded in `get_agent_plan`. Adding a new step to the pipeline (e.g. `fraud_score`) means editing this function. This is the fixed DAG.
+2. **Which agent serves a skill** — resolved at runtime via the Registry. If a second team deploys a faster Equifax-compatible agent with skill `credit_score`, the `AgentResolver` picks it automatically. Zero Orchestrator code changes.
 
 ---
 
