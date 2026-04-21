@@ -6,7 +6,10 @@ WORKDIR /app
 
 COPY agents/shared/ /app/agents/shared/
 
-COPY agents/orchestrator/requirements.txt /app/
+# Copy all agents to /app/agents/ for imports
+COPY agents/ /app/agents/
+
+COPY agents/orchestrator/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY agents/orchestrator/ /app/orchestrator/
