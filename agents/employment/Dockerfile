@@ -9,8 +9,8 @@ COPY agents/shared/ /app/agents/shared/
 COPY agents/employment/requirements.txt /app/
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY agents/employment/ /app/
+COPY agents/employment/ /app/agents/employment/
 
 EXPOSE 8002
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["uvicorn", "agents.employment.main:app", "--host", "0.0.0.0", "--port", "8002"]
