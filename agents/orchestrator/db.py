@@ -195,3 +195,33 @@ class TaskManager:
                 (verification_request_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # sse_events
+    # ------------------------------------------------------------------
+
+    def write_sse_event(
+        self,
+        correlation_id: str,
+        event_type: str,
+        payload: str,
+    ) -> None:
+        """INSERT into sse_events table."""
+        with self._conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO sse_events
+                    (correlation_id, event_type, payload, emitted_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (correlation_id, event_type, payload, _now()),
+            )
+
+    def get_sse_events(self, correlation_id: str) -> list[dict]:
+        """SELECT all events ordered by id ASC."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sse_events WHERE correlation_id = ? ORDER BY id ASC",
+                (correlation_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]

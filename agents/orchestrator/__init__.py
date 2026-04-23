@@ -8,8 +8,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
+from starlette.responses import StreamingResponse
 
 import structlog
 
@@ -20,6 +22,27 @@ from .dispatcher import TaskDispatcher
 from .models import VerificationRequest, VerifyResponse, TaskStatusResponse
 from .resolver import AgentResolver, NoCandidateAgentError
 from .workflow import get_agent_plan
+from .sse import SSEStreamer
+from .events import (
+    EVENT_TYPE_AGENTS_RESOLVED,
+    EVENT_TYPE_AGENT_STARTED,
+    EVENT_TYPE_AGENT_COMPLETED,
+    EVENT_TYPE_AGENT_FAILED,
+    EVENT_TYPE_AGENT_SKIPPED,
+    EVENT_TYPE_SYNTHESIS_STARTED,
+    EVENT_TYPE_SYNTHESIS_COMPLETED,
+    EVENT_TYPE_COMPLETED,
+    EVENT_TYPE_FAILED,
+    build_agents_resolved_payload,
+    build_agent_started_payload,
+    build_agent_completed_payload,
+    build_agent_failed_payload,
+    build_agent_skipped_payload,
+    build_synthesis_started_payload,
+    build_synthesis_completed_payload,
+    build_completed_payload,
+    build_failed_payload,
+)
 
 logger = structlog.get_logger()
 
@@ -30,6 +53,7 @@ with open(agent_card_path) as f:
 _url_hash: str | None = None
 resolver = AgentResolver()
 task_manager = TaskManager()
+sse_streamer = SSEStreamer(task_manager)
 dispatcher = TaskDispatcher()
 
 
@@ -56,17 +80,15 @@ def agent_card():
 
 @app.get("/health")
 def health():
-    """Liveness check."""
     return {"status": "healthy", "agent": "orchestrator", "port": 8000}
 
 
 @app.post("/verify")
 async def verify(body: VerificationRequest) -> VerifyResponse:
-    """Accept a verification request, persist it, and kick off the pipeline in the background."""
+    """Accept a verification request, persist it, and return task info."""
     task_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
     task_manager.create_verification_request(task_id, correlation_id, body)
-    # Fire and forget — caller polls GET /verify/{task_id} for status
     asyncio.create_task(run_verification(task_id, correlation_id, body))
     return VerifyResponse(
         task_id=task_id,
@@ -106,24 +128,69 @@ async def resolve_skill(skill: str):
         return {"skill": skill, "error": str(e)}
 
 
+@app.get("/verify/{task_id}/stream")
+async def stream_verification(
+    task_id: str,
+) -> StreamingResponse:
+    """Stream SSE events for a verification task.
+
+    Returns a StreamingResponse with media_type="text/event-stream".
+    Works whether called before the pipeline starts (live) or after (replay from DB).
+    """
+    result = task_manager.get_verification_request(task_id)
+    if result is None:
+        raise HTTPException(404, "Task not found")
+
+    correlation_id = result["correlation_id"]
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        # Stream events from sse_streamer
+        async for event in sse_streamer.stream(task_id, correlation_id):
+            yield event
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 async def run_verification(
     task_id: str, correlation_id: str, body: VerificationRequest
 ) -> None:
-    """Full orchestration pipeline: fan-out → collect → chain to synthesis."""
+    """Full orchestration pipeline: fan-out → collect → chain to synthesis.
+
+    Emits SSE events at each milestone. Client disconnect is safe —
+    the pipeline is a fire-and-forget asyncio.create_task.
+    """
     log = logger.bind(task_id=task_id, correlation_id=correlation_id)
 
     try:
         task_manager.update_request_status(task_id, "working")
 
-        # 1. Determine which agents to invoke
+        # 1. Allocate queue for SSE streaming
+        await sse_streamer.create_stream(task_id)
+
+        # 2. Determine which agents to invoke
         plan = get_agent_plan(body.use_case, body.has_foreign_addr)
         log.info("agent_plan_resolved", parallel=[n for _, n, _ in plan["parallel"]])
 
-        # 2. Resolve all parallel agent URLs from Registry
+        # 3. Resolve all parallel agent URLs from Registry
         skills_to_resolve = [skill for skill, _, _ in plan["parallel"]]
         skill_urls = await resolver.find_all(skills_to_resolve)
 
-        # 3. Build and dispatch all parallel tasks concurrently
+        # 4. Emit agents_resolved after resolution
+        agents = list(skill_urls.keys())
+        await sse_streamer.emit(
+            task_id, correlation_id, EVENT_TYPE_AGENTS_RESOLVED,
+            build_agents_resolved_payload(agents),
+        )
+
+        # 5. Build and dispatch all parallel tasks concurrently
         async def dispatch_one(
             skill: str, agent_name: str, required: bool
         ) -> AgentOutcome:
@@ -143,23 +210,52 @@ async def run_verification(
                 agent_name, skill, body.model_dump(), 1, started_at,
             )
 
+            # Emit agent_started before dispatch
+            await sse_streamer.emit(
+                task_id, correlation_id, EVENT_TYPE_AGENT_STARTED,
+                build_agent_started_payload(agent_name, skill),
+            )
+
             outcome = await dispatcher.dispatch(agent_url, a2a_task, agent_name)
 
             ended_at = datetime.now(timezone.utc).isoformat()
-            error_dict = outcome.error.model_dump() if outcome.error else None
             task_manager.complete_agent_task(
                 agent_task_id, outcome.status,
-                outcome.artifact, error_dict, ended_at,
+                outcome.artifact, outcome.error.model_dump() if outcome.error else None, ended_at,
             )
+
+            # Emit completion event
+            if outcome.status == "completed":
+                await sse_streamer.emit(
+                    task_id, correlation_id, EVENT_TYPE_AGENT_COMPLETED,
+                    build_agent_completed_payload(outcome.agent_name, outcome.status),
+                )
+            elif outcome.status == "failed":
+                await sse_streamer.emit(
+                    task_id, correlation_id, EVENT_TYPE_AGENT_FAILED,
+                    build_agent_failed_payload(
+                        outcome.agent_name, outcome.status,
+                        outcome.error.message if outcome.error else "unknown error",
+                    ),
+                )
+            elif outcome.status == "timed_out":
+                await sse_streamer.emit(
+                    task_id, correlation_id, EVENT_TYPE_AGENT_FAILED,
+                    build_agent_failed_payload(
+                        outcome.agent_name, outcome.status,
+                        outcome.error.message if outcome.error else "timeout",
+                    ),
+                )
+
             return outcome
 
-        # 4. Fan-out: asyncio.gather across all parallel agents
+        # 6. Fan-out: asyncio.gather across all parallel agents
         parallel_outcomes = await asyncio.gather(
             *[dispatch_one(skill, name, req) for skill, name, req in plan["parallel"]]
         )
         outcomes: list[AgentOutcome] = list(parallel_outcomes)
 
-        # 5. Add skipped agent outcomes for agents not in the parallel plan
+        # 7. Add skipped agent outcomes for agents not in the parallel plan
         all_possible = {
             "credit_score": "equifax",
             "employment_status": "employment",
@@ -184,13 +280,24 @@ async def run_verification(
                     artifact=None,
                     error=None,
                 ))
+                # Emit agent_skipped event
+                await sse_streamer.emit(
+                    task_id, correlation_id, EVENT_TYPE_AGENT_SKIPPED,
+                    build_agent_skipped_payload(agent_name, "not required for this use case"),
+                )
 
         log.info(
             "parallel_phase_complete",
             outcomes={o.agent_name: o.status for o in outcomes},
         )
 
-        # 6. Sequential chain: dispatch to Risk Synthesis
+        # 8. Emit synthesis_started before dispatching to Risk Synthesis
+        await sse_streamer.emit(
+            task_id, correlation_id, EVENT_TYPE_SYNTHESIS_STARTED,
+            build_synthesis_started_payload("synthesis"),
+        )
+
+        # 9. Sequential chain: dispatch to Risk Synthesis
         synthesis_skill, synthesis_name, _ = plan["sequential"][0]
         synthesis_url = await resolver.find(synthesis_skill)
 
@@ -223,11 +330,32 @@ async def run_verification(
             synthesis_outcome.artifact, error_dict, ended_at,
         )
 
-        # 7. Determine final status and decision
+        # 10. Emit synthesis completion
+        if synthesis_outcome.status == "completed":
+            artifact = synthesis_outcome.artifact
+            decision = artifact.get("decision") if artifact else None
+            confidence = artifact.get("confidence", "medium") if artifact else "unknown"
+            await sse_streamer.emit(
+                task_id, correlation_id, EVENT_TYPE_SYNTHESIS_COMPLETED,
+                build_synthesis_completed_payload(decision, confidence),
+            )
+        elif synthesis_outcome.status == "failed":
+            await sse_streamer.emit(
+                task_id, correlation_id, EVENT_TYPE_FAILED,
+                build_failed_payload(task_id, "Synthesis agent failed"),
+            )
+
+        # 11. Determine final status and decision
         if synthesis_outcome.status == "completed" and synthesis_outcome.artifact:
             decision = synthesis_outcome.artifact.get("decision")
             task_manager.update_request_status(task_id, "completed", decision=decision)
             log.info("pipeline_completed", decision=decision)
+
+            # Emit completed event
+            await sse_streamer.emit(
+                task_id, correlation_id, EVENT_TYPE_COMPLETED,
+                build_completed_payload(task_id, decision),
+            )
         else:
             task_manager.update_request_status(task_id, "failed")
             log.warning("pipeline_failed", synthesis_status=synthesis_outcome.status)
@@ -235,3 +363,12 @@ async def run_verification(
     except Exception as exc:
         log.error("pipeline_exception", error=str(exc))
         task_manager.update_request_status(task_id, "failed")
+        # Emit failed event on exception
+        await sse_streamer.emit(
+            task_id, correlation_id, EVENT_TYPE_FAILED,
+            build_failed_payload(task_id, str(exc)),
+        )
+
+    finally:
+        # Always complete the stream — closes the SSE connection cleanly
+        await sse_streamer.complete(task_id)

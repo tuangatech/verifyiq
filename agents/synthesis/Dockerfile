@@ -9,8 +9,8 @@ COPY agents/shared/ /app/agents/shared/
 COPY agents/synthesis/requirements.txt /app/
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY agents/synthesis/ /app/
+COPY agents/synthesis/ /app/agents/synthesis/
 
 EXPOSE 8004
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004"]
+CMD ["uvicorn", "agents.synthesis.main:app", "--host", "0.0.0.0", "--port", "8004"]

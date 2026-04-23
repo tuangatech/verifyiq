@@ -9,8 +9,8 @@ COPY agents/shared/ /app/agents/shared/
 COPY agents/intl/requirements.txt /app/
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY agents/intl/ /app/
+COPY agents/intl/ /app/agents/intl/
 
 EXPOSE 8003
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["uvicorn", "agents.intl.main:app", "--host", "0.0.0.0", "--port", "8003"]

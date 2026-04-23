@@ -97,21 +97,35 @@ A shared `BASE_SYSTEM_PROMPT` constant avoids repeating the persona setup across
 
 **File:** `agents/employment/graph.py` — new file.
 
-Constructs and compiles a `StateGraph` from `langgraph.graph`. Export a `build_employment_graph()` function that returns the compiled graph.
+Constructs and compiles a `StateGraph` from `langgraph.graph`.
 
 **Graph topology:**
 
 ```
 lookup_current_employer
         │
-        ├── currently_employed == True ──→ verify_income ─→ calculate_tenure ─→ build_artifact ─→ END
+        ├─── currently_employed == True ───→ verify_income
         │
-        └── currently_employed == False ─→ lookup_prior_employer ─→ verify_income ─→ ...same
+        └─── currently_employed == False ──→ lookup_prior_employer → verify_income
+                                                                          │
+                                                                  calculate_tenure
+                                                                          │
+                                                                   build_artifact
+                                                                          │
+                                                                         END
 ```
 
-One conditional edge after `lookup_current_employer`. If `state["error"]` is set at any point, short-circuit to `build_artifact`.
+One conditional edge after `lookup_current_employer` — routes based on `state["currently_employed"]`. If `state["error"]` is set, short-circuit to `build_artifact` (which produces a low-confidence result).
 
-Compile once at module level — compiled graphs are stateless and safe to reuse across requests. Invoke with `await compiled.ainvoke(initial_state)`.
+Export a `build_employment_graph()` function that returns the compiled graph. Call it once at module level — compiled LangGraph graphs are stateless and reusable across requests.
+
+**Key LangGraph API surface:**
+- `StateGraph(EmploymentGraphState)`
+- `graph.add_node(name, fn)`
+- `graph.add_edge(source, target)`
+- `graph.add_conditional_edges(source, routing_fn, route_map)`
+- `graph.set_entry_point(name)`
+- `graph.compile()` → invoke via `await compiled.ainvoke(initial_state)`
 
 ---
 
@@ -119,15 +133,26 @@ Compile once at module level — compiled graphs are stateless and safe to reuse
 
 **File:** `agents/employment/main.py` — rewrite.
 
-The `POST /tasks/send` handler changes from "call LLM directly" to "build initial state → `await graph.ainvoke(state)` → construct `EmploymentArtifact` from terminal state." Handle three error paths: graph exception (`GRAPH_EXECUTION_FAILED`), node-level error in state (`LLM_VALIDATION_FAILED`), artifact Pydantic validation failure (`LLM_VALIDATION_FAILED`).
+**What changes:**
+- Import the compiled graph instead of `tools.py` functions
+- `POST /tasks/send` builds initial state from `task.input`, calls `await graph.ainvoke(state)`, then constructs `EmploymentArtifact` from the terminal state
+- Three error paths: graph execution exception → `GRAPH_EXECUTION_FAILED`; node-level `error` in state → `LLM_VALIDATION_FAILED`; Pydantic validation of final artifact → `LLM_VALIDATION_FAILED`
 
-Everything else stays identical: `lifespan`, Agent Card, `/health`, `GET /tasks/{task_id}`, response schema. Delete old `tools.py`.
+**What stays identical:**
+- `lifespan` (Registry registration/deregistration)
+- `/.well-known/agent.json`, `/health`, `GET /tasks/{task_id}`
+- Agent Card content (skills unchanged)
+- Response schema (`A2ATaskResult` with `EmploymentArtifact`)
+
+**Old `tools.py` can be deleted** — all its functions are replaced by graph nodes.
 
 ---
 
 ### Step 6.6 — Dependencies and Dockerfile
 
-`langgraph` is already in `requirements.txt`. Add `langchain-core>=0.3.0` if needed. Dockerfile needs no changes — new files are in `agents/employment/` and already copied. Verify `agents/employment/__init__.py` exists for package imports.
+**File:** `agents/employment/requirements.txt` — verify `langgraph` is present (it already is). Add `langchain-core>=0.3.0` if required as a transitive dependency.
+
+**Dockerfile** — No changes needed. New `.py` files inside `agents/employment/` are copied by existing `COPY agents/employment/ /app/` directive. Verify `agents/employment/__init__.py` exists (needed for `from agents.employment.graph import ...`).
 
 ---
 
@@ -203,15 +228,30 @@ Every event payload includes `correlation_id`. Wire format follows the SSE spec:
 
 **File:** `agents/orchestrator/sse.py` — new file.
 
-An `asyncio.Queue`-per-request design that also persists to SQLite for replay:
+**Responsibilities:**
+1. Maintain a `asyncio.Queue` per `task_id` for live event delivery
+2. Persist every event to `sse_events` table (via TaskManager)
+3. Stream events to clients — with catch-up replay for late connectors
 
-- `emit()` writes to both the live queue and `sse_events` table
-- `stream()` is an async generator: replays historical events from DB (catch-up), then yields live events from the queue, stopping on a `None` sentinel
-- `create_stream()` / `complete()` manage the lifecycle
+**Architecture:**
 
-**Why both queue and DB:** Queue gives zero-latency to connected clients. DB gives replay for late connectors. Both are cheap (~15 events per pipeline run).
+```
+run_verification() ──emit()──→ [Queue] ──stream()──→ StreamingResponse → Client
+                        │
+                        └──→ [SQLite sse_events]
+                                    │
+                    late client ←───┘ (replay from DB, then live from queue)
+```
 
-**Why sentinel:** The `stream()` generator blocks on `queue.get()`. A `None` value signals "pipeline done" so the generator returns and the HTTP connection closes cleanly.
+**Key methods:**
+- `create_stream(task_id)` — called at pipeline start; allocates a queue
+- `emit(task_id, correlation_id, event_type, payload)` — writes to DB + pushes to queue
+- `complete(task_id)` — pushes sentinel `None` to queue; sets a done flag
+- `stream(task_id, correlation_id)` — async generator yielding SSE-formatted strings; replays from DB first, then yields live from queue; stops on sentinel
+
+**Why queue + DB:** The queue gives zero-latency delivery to connected clients. The DB gives durability for replay. If no client is connected, events accumulate in both (queue is bounded only by pipeline duration — max ~15 events, negligible memory).
+
+**Why sentinel for completion:** The `stream()` generator needs to know when to stop. A `None` sentinel in the queue signals "no more events coming" — the generator yields all remaining events then returns, closing the HTTP connection cleanly.
 
 ---
 
@@ -256,14 +296,21 @@ Add `emit()` calls at each milestone within `run_verification`:
 
 ### Step 6.14 — Client Disconnect Safety
 
-No special code needed. `run_verification` is a fire-and-forget `asyncio.create_task` — completely decoupled from the SSE connection. If a client disconnects, the pipeline continues and events persist to SQLite. Reconnecting clients get catch-up replay.
+No special code needed. The architecture already handles disconnection because:
+
+1. `run_verification` is a fire-and-forget `asyncio.create_task` — not tied to any HTTP request lifecycle
+2. `emit()` writes to SQLite regardless of whether a client is consuming the queue
+3. If the client disconnects, FastAPI stops consuming the `stream()` generator — the queue accumulates but the pipeline continues unaffected
+4. A reconnecting client gets catch-up replay from SQLite
+
+This is a key design advantage of separating the pipeline execution from the SSE delivery layer.
 
 ---
 
 ### Step 6.15 — Smoke Test SSE
 
 ```bash
-# Submit a request, capture task_id
+# Submit a request
 $ TASK_ID=$(curl -s -X POST http://localhost:8000/verify \
     -H "Content-Type: application/json" \
     -d '{"subject_name":"SSE Test","subject_id":"S-sse","use_case":"mortgage","has_foreign_addr":true,"consent":true}' \
@@ -273,7 +320,25 @@ $ TASK_ID=$(curl -s -X POST http://localhost:8000/verify \
 $ curl -N http://localhost:8000/verify/$TASK_ID/stream
 ```
 
-Expect: events arriving progressively over 5–15 seconds, ending with `event: completed`. Connection closes after final event. Late-connecting after completion should replay all events instantly from DB.
+Expect: events arriving one-by-one over 5–15 seconds, ending with `event: completed`. Connection closes after final event.
+
+Test late replay:
+```bash
+# Wait for a request to complete, then connect — should replay all events instantly
+$ curl -N http://localhost:8000/verify/$TASK_ID/stream
+```
+
+Verify persistence:
+```bash
+$ docker compose exec orchestrator python -c "
+import sqlite3
+conn = sqlite3.connect('/data/verifyiq.db')
+conn.row_factory = sqlite3.Row
+cur = conn.execute('SELECT event_type, emitted_at FROM sse_events ORDER BY id DESC LIMIT 12')
+for row in cur.fetchall():
+    print(dict(row))
+"
+```
 
 ---
 
@@ -311,7 +376,11 @@ Use the same helper patterns as Phase 5 tests: `_verify_request()`, `_submit_and
 | 11 | `test_sse_client_disconnect_does_not_crash_pipeline` | Connect to stream, read 1-2 events, disconnect. Poll `GET /verify/{task_id}` → reaches `completed`. All agent_tasks present |
 | 12 | `test_sse_skipped_agent_event_emitted` | Submit `rental` request → `agent_skipped` event for `intl`, no `agent_started` for `intl`, pipeline still completes |
 
-**SSE test notes:** Use `httpx` streaming (`client.stream("GET", url)` + `aiter_lines()`). Parse `data:` lines as JSON. Always break on `completed`/`failed` events — otherwise tests hang. For disconnect test: close the stream context early, then poll status separately.
+**SSE test implementation notes:**
+- Use `httpx` streaming: `async with client.stream("GET", url) as stream: async for line in stream.aiter_lines()`
+- Parse `data:` lines as JSON
+- Break out of stream loop when `event_type == "completed"` or `"failed"` — otherwise test hangs
+- For disconnect test: close the stream context after reading a couple events, then poll separately
 
 ---
 
