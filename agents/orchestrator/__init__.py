@@ -23,6 +23,26 @@ from .models import VerificationRequest, VerifyResponse, TaskStatusResponse
 from .resolver import AgentResolver, NoCandidateAgentError
 from .workflow import get_agent_plan
 from .sse import SSEStreamer
+from .events import (
+    EVENT_TYPE_AGENTS_RESOLVED,
+    EVENT_TYPE_AGENT_STARTED,
+    EVENT_TYPE_AGENT_COMPLETED,
+    EVENT_TYPE_AGENT_FAILED,
+    EVENT_TYPE_AGENT_SKIPPED,
+    EVENT_TYPE_SYNTHESIS_STARTED,
+    EVENT_TYPE_SYNTHESIS_COMPLETED,
+    EVENT_TYPE_COMPLETED,
+    EVENT_TYPE_FAILED,
+    build_agents_resolved_payload,
+    build_agent_started_payload,
+    build_agent_completed_payload,
+    build_agent_failed_payload,
+    build_agent_skipped_payload,
+    build_synthesis_started_payload,
+    build_synthesis_completed_payload,
+    build_completed_payload,
+    build_failed_payload,
+)
 
 logger = structlog.get_logger()
 
@@ -69,6 +89,7 @@ async def verify(body: VerificationRequest) -> VerifyResponse:
     task_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
     task_manager.create_verification_request(task_id, correlation_id, body)
+    asyncio.create_task(run_verification(task_id, correlation_id, body))
     return VerifyResponse(
         task_id=task_id,
         correlation_id=correlation_id,

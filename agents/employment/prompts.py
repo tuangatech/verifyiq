@@ -47,13 +47,15 @@ def prior_employer_prompt(subject_id: str, subject_name: str, use_case: str) -> 
 Since the subject is not currently employed, find their most recent prior employer. Return ONLY this JSON schema:
 {{
   "employer_name": "<string>",
+  "employment_start_date": "<YYYY-MM-DD>",
   "employment_end_date": "<YYYY-MM-DD>"
 }}
 
 Guidelines:
 - Prior employer should reflect recent employment history
 - Employment end date should be within the last 5 years
-- Use realistic end dates based on the subject's employment pattern"""
+- Employment start date should be before the end date (typically 1-10 years of tenure)
+- Use realistic dates based on the subject's employment pattern"""
 
     return system, user
 

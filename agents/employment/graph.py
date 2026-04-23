@@ -1,7 +1,5 @@
 """LangGraph state machine for the Employment Verification workflow."""
 
-from typing import TypedDict, Union, List
-
 from langgraph.graph import StateGraph, END
 
 from .graph_state import EmploymentGraphState
@@ -14,37 +12,12 @@ from .nodes import (
 )
 
 
-class EmploymentState(TypedDict):
-    """Internal state dict for LangGraph compilation.
-
-    Mirrors EmploymentGraphState TypedDict but extends it to include
-    intermediate values needed for routing (currently_employed for conditional edge).
-    """
-    subject_id: str
-    subject_name: str
-    use_case: str
-    today: str
-    currently_employed: bool
-    employer_name: str
-    employment_start_date: str
-    employment_type: str
-    prior_employer_name: str
-    prior_employer_end_date: str
-    verified_annual_income: int
-    income_currency: str
-    tenure_years: float
-    verification_confidence: str
-    artifact: dict
-    error: str
-
-
 def build_employment_graph() -> StateGraph:
     """Construct and compile the Employment Verification graph.
 
     Returns a compiled, stateless graph ready for reuse across requests.
     """
-    # Create graph with EmploymentState as the type hint
-    graph = StateGraph(EmploymentState)
+    graph = StateGraph(EmploymentGraphState)
 
     # Add all five nodes
     graph.add_node("lookup_current_employer", lookup_current_employer)
@@ -61,18 +34,13 @@ def build_employment_graph() -> StateGraph:
     # - If True: go directly to verify_income
     # - If False: go to lookup_prior_employer
     # - If error: go to build_artifact (terminal path)
-    def route_after_employer_check(
-        state: EmploymentState
-    ) -> Union[str, List[str]]:
-        """Route based on employment status.
-
-        Returns either "verify_income", "lookup_prior_employer", "build_artifact", or "END".
-        """
+    def route_after_employer_check(state: EmploymentGraphState) -> str:
+        """Route based on employment status."""
         if state.get("error"):
             return "build_artifact"
         if state.get("currently_employed"):
             return "verify_income"
-        return ["lookup_prior_employer", "verify_income"]
+        return "lookup_prior_employer"
 
     # Add conditional edge with route map
     graph.add_conditional_edges(
@@ -82,7 +50,6 @@ def build_employment_graph() -> StateGraph:
             "verify_income": "verify_income",
             "lookup_prior_employer": "lookup_prior_employer",
             "build_artifact": "build_artifact",
-            "END": END,
         },
     )
 
@@ -95,5 +62,7 @@ def build_employment_graph() -> StateGraph:
     # After calculate_tenure, build final artifact
     graph.add_edge("calculate_tenure", "build_artifact")
 
-    # Compile the graph — this makes it stateless and reusable
+    # build_artifact is the terminal node
+    graph.add_edge("build_artifact", END)
+
     return graph.compile()

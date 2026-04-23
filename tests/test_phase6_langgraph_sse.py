@@ -284,6 +284,31 @@ async def test_employment_langgraph_multiple_calls_vary(employment_client: httpx
 # SSE Streaming Tests (6 tests)
 # ---------------------------------------------------------------------------
 
+async def _collect_sse_events(
+    client: httpx.AsyncClient,
+    url: str,
+    stop_on: str = "completed",
+    max_events: int | None = None,
+) -> list[dict]:
+    """Stream SSE events from url, parse data: lines, stop on terminal event or max_events."""
+    events: list[dict] = []
+    async with client.stream("GET", url) as response:
+        async for line in response.aiter_lines():
+            if not line.strip():
+                continue
+            if line.startswith("data:"):
+                payload_str = line[5:].strip()
+                if payload_str:
+                    parsed = json.loads(payload_str)
+                    events.append(parsed)
+                    if max_events and len(events) >= max_events:
+                        break
+                    et = parsed.get("event_type", "")
+                    if et == stop_on or et == "failed":
+                        break
+    return events
+
+
 # Test 7: Stream emits events until completed
 async def test_sse_stream_emits_events(orchestrator_client: httpx.AsyncClient):
     """Connect to stream, collect events until completed → at least 4 events."""
@@ -292,27 +317,14 @@ async def test_sse_stream_emits_events(orchestrator_client: httpx.AsyncClient):
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 
-    events = []
+    async with httpx.AsyncClient(
+        base_url=str(orchestrator_client.base_url), timeout=60.0
+    ) as client:
+        events = await _collect_sse_events(client, f"/verify/{task_id}/stream")
 
-    async def consume_events(client: httpx.AsyncClient):
-        async for line in client.stream("GET", f"{orchestrator_client.base_url}/verify/{task_id}/stream").aiter_lines():
-            if not line.strip():
-                continue
-            if line.startswith("data:"):
-                payload_str = line[5:].strip()
-                if payload_str:
-                    events.append(json.loads(payload_str))
-            if line.startswith("event: completed"):
-                break
-
-    async with httpx.AsyncClient(base_url=orchestrator_client.base_url) as client:
-        await consume_events(client)
-
-    # Should have at least 4 events: agents_resolved, agent_started, agent_completed, completed
     assert len(events) >= 4, f"Expected at least 4 events, got {len(events)}"
 
-    # Verify we have required events
-    event_types = [e.get("event_type", "unknown") for e in events]
+    event_types = [e.get("event_type") for e in events]
     assert "agents_resolved" in event_types, f"agents_resolved not in {event_types}"
     assert "completed" in event_types, f"completed not in {event_types}"
 
@@ -326,28 +338,16 @@ async def test_sse_events_contain_correlation_id(orchestrator_client: httpx.Asyn
     task_id = resp.json()["task_id"]
     correlation_id = resp.json()["correlation_id"]
 
-    events = []
+    async with httpx.AsyncClient(
+        base_url=str(orchestrator_client.base_url), timeout=60.0
+    ) as client:
+        events = await _collect_sse_events(client, f"/verify/{task_id}/stream")
 
-    async def consume_events(client: httpx.AsyncClient):
-        async for line in client.stream("GET", f"{orchestrator_client.base_url}/verify/{task_id}/stream").aiter_lines():
-            if not line.strip():
-                continue
-            if line.startswith("data:"):
-                payload_str = line[5:].strip()
-                if payload_str:
-                    events.append(json.loads(payload_str))
-            if line.startswith("event: completed"):
-                break
-
-    async with httpx.AsyncClient(base_url=orchestrator_client.base_url) as client:
-        await consume_events(client)
-
-    # All events should have matching correlation_id
+    assert len(events) >= 1
     for event in events:
         assert event.get("correlation_id") == correlation_id, (
             f"Expected {correlation_id}, got {event.get('correlation_id')}"
         )
-    assert len(events) >= 1
 
 
 # Test 9: Progress events arrive before completion
@@ -358,37 +358,22 @@ async def test_sse_progress_before_completion(orchestrator_client: httpx.AsyncCl
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 
-    events = []
-    event_types_seen = []
+    async with httpx.AsyncClient(
+        base_url=str(orchestrator_client.base_url), timeout=60.0
+    ) as client:
+        events = await _collect_sse_events(client, f"/verify/{task_id}/stream")
 
-    async def consume_events(client: httpx.AsyncClient):
-        async for line in client.stream("GET", f"{orchestrator_client.base_url}/verify/{task_id}/stream").aiter_lines():
-            if not line.strip():
-                continue
-            if line.startswith("event:"):
-                event_name = line.split(" ", 1)[1] if " " in line else ""
-                event_types_seen.append(event_name)
-            if line.startswith("data:"):
-                payload_str = line[5:].strip()
-                if payload_str:
-                    events.append(json.loads(payload_str))
-            if line.startswith("event: completed"):
-                break
+    event_types = [e.get("event_type") for e in events]
 
-    async with httpx.AsyncClient(base_url=orchestrator_client.base_url) as client:
-        await consume_events(client)
+    assert "agents_resolved" in event_types, "agents_resolved event missing"
+    assert "completed" in event_types, "completed event missing"
 
-    # Check that agents_resolved comes before agent_completed
-    agents_resolved_idx = event_types_seen.index("agents_resolved") if "agents_resolved" in event_types_seen else -1
-    completed_idx = event_types_seen.index("completed") if "completed" in event_types_seen else -1
-
-    assert agents_resolved_idx >= 0, "agents_resolved event missing"
-    assert completed_idx >= 0, "completed event missing"
+    agents_resolved_idx = event_types.index("agents_resolved")
+    completed_idx = event_types.index("completed")
     assert agents_resolved_idx < completed_idx, "agents_resolved came after completed"
 
-    # At least one progress event before completion
-    progress_events = ["agent_started", "agent_completed", "synthesis_started", "synthesis_completed"]
-    progress_indices = [event_types_seen.index(e) for e in progress_events if e in event_types_seen]
+    progress_types = {"agent_started", "agent_completed", "synthesis_started", "synthesis_completed"}
+    progress_indices = [i for i, t in enumerate(event_types) if t in progress_types]
     assert len(progress_indices) > 0, "No progress events before completion"
     assert all(idx < completed_idx for idx in progress_indices), "Progress events came after completion"
 
@@ -396,35 +381,19 @@ async def test_sse_progress_before_completion(orchestrator_client: httpx.AsyncCl
 # Test 10: Late-connecting client receives replay from DB
 async def test_sse_events_persisted_to_db(orchestrator_client: httpx.AsyncClient):
     """After pipeline completes, late-connect to stream → replays events from DB."""
-    # Wait a bit before submitting to ensure task completes before connect
-    await asyncio.sleep(1)
-
     body = _verify_request(use_case="mortgage", has_foreign_addr=False)
-    resp = await orchestrator_client.post("/verify", json=body)
-    assert resp.status_code == 200
-    task_id = resp.json()["task_id"]
+    task_id, correlation_id, status_data = await _submit_and_wait(orchestrator_client, body)
+    assert status_data["status"] == "completed", f"Pipeline did not complete: {status_data}"
 
-    events = []
+    # Now late-connect — pipeline already done, should replay from DB
+    async with httpx.AsyncClient(
+        base_url=str(orchestrator_client.base_url), timeout=60.0
+    ) as client:
+        events = await _collect_sse_events(client, f"/verify/{task_id}/stream")
 
-    async def consume_events(client: httpx.AsyncClient):
-        async for line in client.stream("GET", f"{orchestrator_client.base_url}/verify/{task_id}/stream").aiter_lines():
-            if not line.strip():
-                continue
-            if line.startswith("data:"):
-                payload_str = line[5:].strip()
-                if payload_str:
-                    events.append(json.loads(payload_str))
-            if line.startswith("event: completed"):
-                break
-
-    async with httpx.AsyncClient(base_url=orchestrator_client.base_url) as client:
-        await consume_events(client)
-
-    # Late replay should get at least 4 events from DB
     assert len(events) >= 4, f"Expected at least 4 replayed events, got {len(events)}"
 
-    # Events should be in correct order
-    event_types = [e.get("event_type", "unknown") for e in events]
+    event_types = [e.get("event_type") for e in events]
     assert "agents_resolved" in event_types
     assert "completed" in event_types
 
@@ -437,37 +406,28 @@ async def test_sse_client_disconnect_does_not_crash_pipeline(orchestrator_client
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 
-    # Connect to stream and read first couple events
-    events_read = 0
+    # Connect and read only 2 events, then disconnect
+    async with httpx.AsyncClient(
+        base_url=str(orchestrator_client.base_url), timeout=60.0
+    ) as stream_client:
+        await _collect_sse_events(
+            stream_client, f"/verify/{task_id}/stream", max_events=2
+        )
 
-    async def read_partial_stream(client: httpx.AsyncClient):
-        nonlocal events_read
-        async for line in client.stream("GET", f"{orchestrator_client.base_url}/verify/{task_id}/stream").aiter_lines():
-            if not line.strip():
-                continue
-            if line.startswith("data:"):
-                events_read += 1
-                if events_read >= 2:
-                    break
-            if line.startswith("event: completed"):
-                break
-
-    async with httpx.AsyncClient(base_url=orchestrator_client.base_url) as client:
-        await read_partial_stream(client)
-
-    # Now poll the task status - should reach completed even after disconnect
+    # Poll using the fixture client (still open) until pipeline completes
     deadline = time.time() + 60
+    status_data = {}
     while time.time() < deadline:
-        status_resp = await client.get(f"/verify/{task_id}")
+        status_resp = await orchestrator_client.get(f"/verify/{task_id}")
         status_data = status_resp.json()
-        if status_data["status"] == "completed":
+        if status_data["status"] in ("completed", "failed"):
             break
         await asyncio.sleep(0.5)
 
     assert status_data["status"] == "completed", f"Pipeline failed: {status_data}"
 
     # Verify all agent_tasks present
-    tasks = await _get_agent_tasks(client, task_id)
+    tasks = await _get_agent_tasks(orchestrator_client, task_id)
     by_name = _tasks_by_name(tasks)
     assert "equifax" in by_name
     assert "employment" in by_name
@@ -482,34 +442,20 @@ async def test_sse_skipped_agent_event_emitted(orchestrator_client: httpx.AsyncC
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 
-    events = []
-
-    async def consume_events(client: httpx.AsyncClient):
-        async for line in client.stream("GET", f"{orchestrator_client.base_url}/verify/{task_id}/stream").aiter_lines():
-            if not line.strip():
-                continue
-            if line.startswith("data:"):
-                payload_str = line[5:].strip()
-                if payload_str:
-                    events.append(json.loads(payload_str))
-            if line.startswith("event: completed"):
-                break
-
-    async with httpx.AsyncClient(base_url=orchestrator_client.base_url) as client:
-        await consume_events(client)
+    async with httpx.AsyncClient(
+        base_url=str(orchestrator_client.base_url), timeout=60.0
+    ) as client:
+        events = await _collect_sse_events(client, f"/verify/{task_id}/stream")
 
     # Find intl-related events
-    intl_events = [e for e in events if e.get("agent") == "intl" or e.get("agent_name") == "intl"]
+    intl_events = [e for e in events if e.get("agent") == "intl"]
 
-    # Should have skipped event, not started/completed
     skipped_events = [e for e in intl_events if e.get("event_type") == "agent_skipped"]
-    assert len(skipped_events) > 0, f"No skipped event for intl in {intl_events}"
+    assert len(skipped_events) > 0, f"No skipped event for intl in {events}"
 
-    # For rental, intl should be skipped
     for event in skipped_events:
-        assert event["reason"].endswith("not required for this use case")
+        assert "not required for this use case" in event["reason"]
 
-    # Should NOT have started/completed for intl
     started_events = [e for e in intl_events if e.get("event_type") == "agent_started"]
     completed_events = [e for e in intl_events if e.get("event_type") == "agent_completed"]
     assert len(started_events) == 0, f"Unexpected agent_started for intl: {started_events}"

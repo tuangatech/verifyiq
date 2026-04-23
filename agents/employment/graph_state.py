@@ -25,6 +25,7 @@ class EmploymentGraphState(TypedDict, total=False):
 
     # Prior employer fallback
     prior_employer_name: Optional[str]
+    prior_employer_start_date: Optional[str]
     prior_employer_end_date: Optional[str]
 
     # Income
@@ -34,6 +35,9 @@ class EmploymentGraphState(TypedDict, total=False):
     # Computed
     tenure_years: Optional[float]
     verification_confidence: Optional[str]
+
+    # Final artifact (built by build_artifact node)
+    artifact: Optional[dict]
 
     # Error (if any node fails, short-circuits to end)
     error: Optional[str]

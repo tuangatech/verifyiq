@@ -6,27 +6,6 @@ from typing import AsyncGenerator
 
 import structlog
 
-from .events import (
-    EVENT_TYPE_AGENTS_RESOLVED,
-    EVENT_TYPE_AGENT_STARTED,
-    EVENT_TYPE_AGENT_COMPLETED,
-    EVENT_TYPE_AGENT_FAILED,
-    EVENT_TYPE_AGENT_SKIPPED,
-    EVENT_TYPE_SYNTHESIS_STARTED,
-    EVENT_TYPE_SYNTHESIS_COMPLETED,
-    EVENT_TYPE_COMPLETED,
-    EVENT_TYPE_FAILED,
-    build_agents_resolved_payload,
-    build_agent_started_payload,
-    build_agent_completed_payload,
-    build_agent_failed_payload,
-    build_agent_skipped_payload,
-    build_synthesis_started_payload,
-    build_synthesis_completed_payload,
-    build_completed_payload,
-    build_failed_payload,
-)
-
 logger = structlog.get_logger()
 
 
@@ -44,12 +23,14 @@ class SSEStreamer:
         self._queues: dict[str, asyncio.Queue] = {}
         self._done: dict[str, bool] = {}
         self._queues_lock = asyncio.Lock()
+        self._seq: dict[str, int] = {}
 
     async def create_stream(self, task_id: str) -> None:
         """Called at pipeline start; allocates a queue for this task."""
         async with self._queues_lock:
             self._queues[task_id] = asyncio.Queue(maxsize=100)
             self._done[task_id] = False
+            self._seq[task_id] = 0
 
     async def emit(
         self,
@@ -62,9 +43,12 @@ class SSEStreamer:
 
         Called at each milestone in run_verification.
         """
-        # Include correlation_id in the event payload itself
+        # Include event_type, correlation_id, and sequence number in the event payload
+        self._seq[task_id] = self._seq.get(task_id, 0) + 1
         event_payload = payload.copy()
+        event_payload["event_type"] = event_type
         event_payload["correlation_id"] = correlation_id
+        event_payload["_seq"] = self._seq[task_id]
 
         # Persist to DB
         self._task_manager.write_sse_event(
@@ -111,20 +95,26 @@ class SSEStreamer:
             queue = self._queues.get(task_id)
             done = self._done.get(task_id, True)
 
-        if queue and not done:
-            # Replay from DB first (for late connectors)
+        if done:
+            # Pipeline already finished — pure replay from DB
             events = self._task_manager.get_sse_events(correlation_id)
             for event in events:
-                if event.get("event_type") == "completed":
-                    break
-                # event["payload"] is JSON string in DB; parse it
+                payload = json.loads(event["payload"])
+                event_str = self._format_event(event["event_type"], payload)
+                yield event_str
+            return
+
+        if queue and not done:
+            # Replay already-emitted events from DB (for late connectors mid-pipeline)
+            events = self._task_manager.get_sse_events(correlation_id)
+            for event in events:
                 payload = json.loads(event["payload"])
                 event_str = self._format_event(event["event_type"], payload)
                 yield event_str
 
             replayed = True
 
-        # Now stream live from queue if not already done
+        # Stream live from queue
         if queue and not done:
             while True:
                 try:
@@ -157,7 +147,8 @@ class SSEStreamer:
         id: <sequence>
         \n\n
         """
+        seq = payload.get("_seq", 0)
         line1 = f"event: {event_type}"
         line2 = f"data: {json.dumps(payload)}"
-        line3 = f"id: {payload.get('task_id', 'unknown')}"
+        line3 = f"id: {seq}"
         return f"{line1}\n{line2}\n{line3}\n\n"
