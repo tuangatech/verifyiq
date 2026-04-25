@@ -302,6 +302,54 @@ The Orchestrator accepts A2A tasks from external orchestrators — such as the M
                  └─────────────┘
 ```
 
+#### Mermaid: Technical Architecture
+
+```mermaid
+graph TD
+    MP["Mortgage Platform Orchestrator<br/>(ADK) :9000<br/><i>external team — separate codebase</i>"]
+    ORCH["Orchestrator Agent<br/>(ADK + FastAPI) :8000"]
+    REG["Agent Registry<br/>(FastAPI) :8099<br/>registry.db"]
+    EQ["Equifax Agent<br/>(FastAPI) :8001"]
+    EMP["Employment Agent<br/>(LangGraph) :8002"]
+    INTL["Intl Agent<br/>(FastAPI) :8003"]
+    RISK["Risk Synthesis Agent<br/>(FastAPI) :8004"]
+    DB[("SQLite<br/>verifyiq.db")]
+
+    MP -- "A2A: POST /tasks/send<br/>GET /tasks/{id}/stream (SSE)" --> ORCH
+
+    ORCH -- "GET /agents?skill=..." --> REG
+
+    EQ -- "POST /register" --> REG
+    EMP -- "POST /register" --> REG
+    INTL -- "POST /register" --> REG
+    RISK -- "POST /register" --> REG
+
+    ORCH -- "POST /tasks/send" --> EQ
+    ORCH -- "POST /tasks/send" --> EMP
+    ORCH -- "POST /tasks/send" --> INTL
+    ORCH -- "POST /tasks/send" --> RISK
+
+    ORCH --> DB
+
+    subgraph orch_internals [" "]
+        direction LR
+        AR["AgentResolver"]
+        TM["TaskManager"]
+        SSE["SSE Streamer"]
+    end
+
+    ORCH -.- orch_internals
+
+    style MP fill:#f9f0ff,stroke:#7c3aed
+    style ORCH fill:#dbeafe,stroke:#2563eb
+    style REG fill:#fef3c7,stroke:#d97706
+    style DB fill:#f3f4f6,stroke:#6b7280
+    style EQ fill:#d1fae5,stroke:#059669
+    style EMP fill:#d1fae5,stroke:#059669
+    style INTL fill:#d1fae5,stroke:#059669
+    style RISK fill:#fce7f3,stroke:#db2777
+```
+
 ### Agent Call Graph
 
 ```
@@ -324,6 +372,42 @@ Mortgage Platform Orchestrator (:9000)    ← external team
                                     └→ [sequential] → Risk Synthesis (:8004)
           ←─ SSE stream of progress events ────────────────────────────┘
           ←─ Final VerificationDecision artifact via A2A task result ──┘
+```
+
+#### Mermaid: Agent Call Graph
+
+```mermaid
+graph LR
+    subgraph UC1_4 ["UC-1 through UC-4 — user-initiated"]
+        USER["User (terminal)"]
+        CLI["CLI<br/>verifyiq run"]
+        USER --> CLI
+        CLI -- "POST /verify" --> O1["Orchestrator :8000"]
+        O1 -- queries --> R1["Registry"]
+        O1 -- "parallel" --> E1["Equifax :8001"]
+        O1 -- "parallel" --> EM1["Employment :8002"]
+        O1 -- "parallel, optional" --> I1["Intl :8003"]
+        O1 -- "sequential" --> S1["Risk Synthesis :8004"]
+    end
+
+    subgraph UC5 ["UC-5 — platform-initiated"]
+        MPO["Mortgage Platform<br/>Orchestrator :9000"]
+        MPO -- "A2A: POST /tasks/send" --> O2["Orchestrator :8000"]
+        O2 -- queries --> R2["Registry"]
+        O2 -- "parallel" --> E2["Equifax :8001"]
+        O2 -- "parallel" --> EM2["Employment :8002"]
+        O2 -- "parallel, optional" --> I2["Intl :8003"]
+        O2 -- "sequential" --> S2["Risk Synthesis :8004"]
+        S2 -. "SSE progress + final artifact" .-> MPO
+    end
+
+    style MPO fill:#f9f0ff,stroke:#7c3aed
+    style USER fill:#f3f4f6,stroke:#6b7280
+    style CLI fill:#f3f4f6,stroke:#6b7280
+    style O1 fill:#dbeafe,stroke:#2563eb
+    style O2 fill:#dbeafe,stroke:#2563eb
+    style S1 fill:#fce7f3,stroke:#db2777
+    style S2 fill:#fce7f3,stroke:#db2777
 ```
 
 In UC-5, the Orchestrator plays **both roles simultaneously**: it is a callee (A2A server, receiving the Mortgage Platform's task via ADK) and a caller (A2A client, dispatching outbound tasks to data agents). The data agents below it see no difference — they receive the same A2A tasks regardless of who initiated the top-level request.
@@ -651,6 +735,22 @@ submitted → working → completed
 
 `timed_out` is a distinct terminal state from `failed`. Risk Synthesis treats them differently in its prompt — a timeout suggests a transient infrastructure issue, while a failure may indicate a data or logic problem.
 
+#### Mermaid: A2A Task Lifecycle States
+
+```mermaid
+stateDiagram-v2
+    [*] --> submitted
+    submitted --> working
+    submitted --> skipped : agent not invoked<br/>for this use case
+    working --> completed
+    working --> failed : agent error or<br/>retry exhausted
+    working --> timed_out : no response within<br/>timeout_ms
+    completed --> [*]
+    failed --> [*]
+    timed_out --> [*]
+    skipped --> [*]
+```
+
 ---
 
 ### Orchestration Flow
@@ -719,6 +819,62 @@ User submits verification request
   → Write synthesis agent_task row
   → Emit SSE: { type: "completed", report: full_report, correlation_id }
   → Close SSE stream
+```
+
+#### Mermaid: Orchestration Flow
+
+```mermaid
+sequenceDiagram
+    participant CLI as CLI / Mortgage Platform
+    participant O as Orchestrator
+    participant R as Registry
+    participant EQ as Equifax Agent
+    participant EM as Employment Agent
+    participant INTL as Intl Agent
+    participant RS as Risk Synthesis
+
+    CLI->>O: POST /verify (subject, use_case)
+    activate O
+    O->>O: Generate correlation_id<br/>Write verification_requests (submitted)
+    O-->>CLI: { task_id, correlation_id, stream_url }
+
+    note over O: Background coroutine begins
+
+    O->>R: GET /agents?skill=...
+    R-->>O: Agent URLs
+    O-->>CLI: SSE: "Agents resolved"
+
+    par Parallel fan-out
+        O->>EQ: POST /tasks/send (attempt 1)
+        activate EQ
+        EQ-->>O: A2ATaskResult (completed)
+        deactivate EQ
+        O-->>CLI: SSE: "Credit report received"
+    and
+        O->>EM: POST /tasks/send (attempt 1)
+        activate EM
+        EM-->>O: A2ATaskResult (completed)
+        deactivate EM
+        O-->>CLI: SSE: "Employment verified"
+    and
+        O->>INTL: POST /tasks/send (attempt 1)
+        activate INTL
+        INTL-->>O: A2ATaskResult (completed / unavailable)
+        deactivate INTL
+        O-->>CLI: SSE: "International data received"
+    end
+
+    note over O: Write agent_tasks rows<br/>Build outcome bundle
+
+    O->>RS: POST /tasks/send (outcome bundle)
+    activate RS
+    RS-->>O: VerificationDecision
+    deactivate RS
+    O-->>CLI: SSE: "Risk synthesis complete"
+
+    O->>O: Write decision + completed_at
+    O-->>CLI: SSE: { type: "completed", report }
+    deactivate O
 ```
 
 ---
@@ -954,10 +1110,14 @@ Local only — all services run on a single developer machine via Docker Desktop
 ### CLI Setup
 
 ```bash
-uv pip install -e cli/        # installs verifyiq-cli with typer, rich, httpx
+uv venv                        # creates .venv at repo root (empty — just Python + pip)
+source .venv/Scripts/activate   # Windows (Git Bash); use .venv/bin/activate on macOS/Linux
+uv pip install -e cli/         # installs verifyiq-cli + deps (typer, rich, httpx, pydantic)
 export VERIFYIQ_URL=http://localhost:8000   # default; optional
 verifyiq run mortgage-intl     # test run
 ```
+
+> **Note:** `uv venv` creates an isolated Python environment — it does not install any packages. The dependencies come from `cli/pyproject.toml` when you run `uv pip install -e cli/`. Activate the venv in each new terminal session before using the `verifyiq` command.
 
 ### Environment Variables (`.env`)
 

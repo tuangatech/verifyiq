@@ -166,6 +166,12 @@ Write tests **before** moving to the next phase.
 - Phase 3 uses stub artifacts deliberately — isolates LLM bugs from protocol bugs in Phase 4
 - `mortgage-platform` starts explicitly only (`docker compose up mortgage-platform`) — not default
 
+## Development Environment
+- Windows 11 + Git Bash (MINGW64) — all shell commands use Unix syntax
+- Python command is `python`, not `python3`
+- Virtual environment activation: `source .venv/Scripts/activate` (not `.venv/bin/activate`)
+- When writing docs or guides, use Windows-compatible paths and commands
+
 ## Approach
 - Think before acting. Read existing files before writing code.
 - Be concise in output but thorough in reasoning.
