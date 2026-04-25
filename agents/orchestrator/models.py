@@ -31,3 +31,24 @@ class TaskStatusResponse(BaseModel):
     decision: Optional[str] = None  # approve / review / decline, populated on completion
     created_at: str
     completed_at: Optional[str] = None
+
+
+class HistoryItem(BaseModel):
+    """One row in GET /verify/history."""
+
+    task_id: str
+    correlation_id: str
+    subject_name: str
+    use_case: str
+    status: str
+    decision: Optional[str] = None
+    created_at: str
+    completed_at: Optional[str] = None
+
+
+class FullVerificationResponse(BaseModel):
+    """Response from GET /verify/{task_id}/full."""
+
+    request: dict
+    agent_tasks: list[dict]
+    sse_events: list[dict]

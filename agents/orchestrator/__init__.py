@@ -19,7 +19,13 @@ from agents.shared.a2a_types import A2ATask, AgentOutcome
 from agents.shared.registry_client import register_with_registry, deregister_from_registry
 from .db import TaskManager
 from .dispatcher import TaskDispatcher
-from .models import VerificationRequest, VerifyResponse, TaskStatusResponse
+from .models import (
+    VerificationRequest,
+    VerifyResponse,
+    TaskStatusResponse,
+    HistoryItem,
+    FullVerificationResponse,
+)
 from .resolver import AgentResolver, NoCandidateAgentError
 from .workflow import get_agent_plan
 from .sse import SSEStreamer
@@ -95,6 +101,22 @@ async def verify(body: VerificationRequest) -> VerifyResponse:
         correlation_id=correlation_id,
         stream_url=f"/verify/{task_id}/stream",
     )
+
+
+@app.get("/verify/history")
+def get_verify_history(limit: int = 20) -> list[HistoryItem]:
+    """Return recent verification requests, most recent first."""
+    limit = max(1, min(limit, 100))
+    return task_manager.get_verification_history(limit)
+
+
+@app.get("/verify/{task_id}/full")
+def get_verify_full(task_id: str) -> FullVerificationResponse:
+    """Full artifact dump — request, agent tasks, and SSE events."""
+    result = task_manager.get_full_verification(task_id)
+    if result is None:
+        raise HTTPException(404, "Task not found")
+    return result
 
 
 @app.get("/verify/{task_id}")

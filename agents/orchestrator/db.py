@@ -13,6 +13,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _parse_json_field(value: str | None) -> Any:
+    """Parse a JSON string column back to a dict/list, or return as-is on failure."""
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return value
+
+
 class TaskManager:
     """Wraps all SQLite reads and writes for verifyiq.db."""
 
@@ -125,6 +135,15 @@ class TaskManager:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_verification_history(self, limit: int = 20) -> list[dict]:
+        """Return recent verification requests ordered by created_at DESC."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM verification_requests ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # ------------------------------------------------------------------
     # agent_tasks
     # ------------------------------------------------------------------
@@ -225,3 +244,29 @@ class TaskManager:
                 (correlation_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Composite queries
+    # ------------------------------------------------------------------
+
+    def get_full_verification(self, task_id: str) -> dict | None:
+        """Return the verification request, all agent tasks, and all SSE events."""
+        request = self.get_verification_request(task_id)
+        if request is None:
+            return None
+
+        agent_tasks = self.get_agent_tasks(task_id)
+        sse_events = self.get_sse_events(request["correlation_id"])
+
+        # Parse JSON string columns back to dicts for clean nested responses
+        for task in agent_tasks:
+            for key in ("artifact", "error", "input"):
+                task[key] = _parse_json_field(task.get(key))
+        for event in sse_events:
+            event["payload"] = _parse_json_field(event.get("payload"))
+
+        return {
+            "request": request,
+            "agent_tasks": agent_tasks,
+            "sse_events": sse_events,
+        }
