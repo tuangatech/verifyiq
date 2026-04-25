@@ -145,7 +145,7 @@ class SSEStreamer:
         event: <type>
         data: <JSON>
         id: <sequence>
-        \n\n
+
         """
         seq = payload.get("_seq", 0)
         line1 = f"event: {event_type}"
