@@ -15,6 +15,8 @@ import uuid
 import pytest
 import httpx
 
+from conftest import AUTH_HEADERS
+
 pytestmark = pytest.mark.asyncio
 
 VALID_DECISIONS = {"approve", "review", "decline"}
@@ -43,7 +45,7 @@ async def _submit_and_wait(
     client: httpx.AsyncClient, body: dict, timeout: int = 60
 ) -> tuple[str, str, dict]:
     """Submit a verify request and poll until terminal status or timeout."""
-    resp = await client.post("/verify", json=body)
+    resp = await client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     task_id = data["task_id"]
@@ -93,7 +95,7 @@ async def test_employment_langgraph_returns_valid_artifact(employment_client: ht
         "timeout_ms": 30000,
         "attempt": 1,
     }
-    resp = await employment_client.post("/tasks/send", json=task)
+    resp = await employment_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
 
@@ -140,7 +142,7 @@ async def test_employment_langgraph_branching_fields(employment_client: httpx.As
         "timeout_ms": 30000,
         "attempt": 1,
     }
-    resp = await employment_client.post("/tasks/send", json=task)
+    resp = await employment_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -171,7 +173,7 @@ async def test_employment_langgraph_income_populated(employment_client: httpx.As
         "timeout_ms": 30000,
         "attempt": 1,
     }
-    resp = await employment_client.post("/tasks/send", json=task)
+    resp = await employment_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -198,7 +200,7 @@ async def test_employment_langgraph_tenure_calculated(employment_client: httpx.A
         "timeout_ms": 30000,
         "attempt": 1,
     }
-    resp = await employment_client.post("/tasks/send", json=task)
+    resp = await employment_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -235,7 +237,7 @@ async def test_employment_langgraph_correlation_id_preserved(employment_client: 
         "timeout_ms": 30000,
         "attempt": 1,
     }
-    resp = await employment_client.post("/tasks/send", json=task)
+    resp = await employment_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["correlation_id"] == custom_corr
@@ -261,9 +263,9 @@ async def test_employment_langgraph_multiple_calls_vary(employment_client: httpx
 
     # Run 3 parallel calls
     results = await asyncio.gather(
-        employment_client.post("/tasks/send", json={**base_task, "task_id": str(uuid.uuid4())}),
-        employment_client.post("/tasks/send", json={**base_task, "task_id": str(uuid.uuid4())}),
-        employment_client.post("/tasks/send", json={**base_task, "task_id": str(uuid.uuid4())}),
+        employment_client.post("/tasks/send", json={**base_task, "task_id": str(uuid.uuid4())}, headers=AUTH_HEADERS),
+        employment_client.post("/tasks/send", json={**base_task, "task_id": str(uuid.uuid4())}, headers=AUTH_HEADERS),
+        employment_client.post("/tasks/send", json={**base_task, "task_id": str(uuid.uuid4())}, headers=AUTH_HEADERS),
     )
 
     artifacts = []
@@ -313,7 +315,7 @@ async def _collect_sse_events(
 async def test_sse_stream_emits_events(orchestrator_client: httpx.AsyncClient):
     """Connect to stream, collect events until completed → at least 4 events."""
     body = _verify_request(use_case="mortgage", has_foreign_addr=False)
-    resp = await orchestrator_client.post("/verify", json=body)
+    resp = await orchestrator_client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 
@@ -333,7 +335,7 @@ async def test_sse_stream_emits_events(orchestrator_client: httpx.AsyncClient):
 async def test_sse_events_contain_correlation_id(orchestrator_client: httpx.AsyncClient):
     """Every event payload has correlation_id matching the one from POST /verify."""
     body = _verify_request(use_case="mortgage", has_foreign_addr=False)
-    resp = await orchestrator_client.post("/verify", json=body)
+    resp = await orchestrator_client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
     correlation_id = resp.json()["correlation_id"]
@@ -354,7 +356,7 @@ async def test_sse_events_contain_correlation_id(orchestrator_client: httpx.Asyn
 async def test_sse_progress_before_completion(orchestrator_client: httpx.AsyncClient):
     """At least one progress event (agent_started/completed) arrives before completed."""
     body = _verify_request(use_case="mortgage", has_foreign_addr=True)
-    resp = await orchestrator_client.post("/verify", json=body)
+    resp = await orchestrator_client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 
@@ -402,7 +404,7 @@ async def test_sse_events_persisted_to_db(orchestrator_client: httpx.AsyncClient
 async def test_sse_client_disconnect_does_not_crash_pipeline(orchestrator_client: httpx.AsyncClient):
     """Connect to stream, read 1-2 events, disconnect. Poll GET /verify/{task_id} → reaches completed."""
     body = _verify_request(use_case="mortgage", has_foreign_addr=True)
-    resp = await orchestrator_client.post("/verify", json=body)
+    resp = await orchestrator_client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 
@@ -438,7 +440,7 @@ async def test_sse_client_disconnect_does_not_crash_pipeline(orchestrator_client
 async def test_sse_skipped_agent_event_emitted(orchestrator_client: httpx.AsyncClient):
     """Submit rental request → agent_skipped event for intl, no agent_started for intl."""
     body = _verify_request(use_case="rental", has_foreign_addr=False)
-    resp = await orchestrator_client.post("/verify", json=body)
+    resp = await orchestrator_client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 

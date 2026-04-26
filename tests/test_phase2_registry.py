@@ -14,6 +14,8 @@ import time
 import pytest
 import httpx
 
+from conftest import AUTH_HEADERS
+
 REGISTRY_URL = "http://localhost:8099"
 ORCHESTRATOR_URL = "http://localhost:8000"
 
@@ -105,9 +107,9 @@ async def test_registration_is_idempotent(registry_client: httpx.AsyncClient):
     }
 
     # Register twice
-    r1 = await registry_client.post("/register", json=payload)
+    r1 = await registry_client.post("/register", json=payload, headers=AUTH_HEADERS)
     assert r1.status_code == 201, r1.text
-    r2 = await registry_client.post("/register", json=payload)
+    r2 = await registry_client.post("/register", json=payload, headers=AUTH_HEADERS)
     assert r2.status_code == 201, r2.text
 
     # Should appear exactly once
@@ -134,7 +136,7 @@ async def test_deregister_removes_agent(registry_client: httpx.AsyncClient):
     }
 
     # Register
-    r = await registry_client.post("/register", json=payload)
+    r = await registry_client.post("/register", json=payload, headers=AUTH_HEADERS)
     assert r.status_code == 201, r.text
     url_hash = r.json()["url_hash"]
 

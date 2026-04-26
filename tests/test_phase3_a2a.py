@@ -14,6 +14,8 @@ import uuid
 import pytest
 import httpx
 
+from conftest import AUTH_HEADERS
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -46,7 +48,7 @@ def _task(skill: str, subject_id: str = "test-S001", extra_input: dict | None = 
 async def test_equifax_task_send_returns_completed(equifax_client: httpx.AsyncClient):
     """POST /tasks/send to Equifax returns completed with artifact."""
     task = _task("credit_score")
-    resp = await equifax_client.post("/tasks/send", json=task)
+    resp = await equifax_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["status"] == "completed"
@@ -60,7 +62,7 @@ async def test_equifax_task_send_returns_completed(equifax_client: httpx.AsyncCl
 async def test_employment_task_send_returns_completed(employment_client: httpx.AsyncClient):
     """POST /tasks/send to Employment returns completed with artifact."""
     task = _task("employment_status")
-    resp = await employment_client.post("/tasks/send", json=task)
+    resp = await employment_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["status"] == "completed"
@@ -74,7 +76,7 @@ async def test_employment_task_send_returns_completed(employment_client: httpx.A
 async def test_intl_task_send_returns_completed(intl_client: httpx.AsyncClient):
     """POST /tasks/send to International returns completed with artifact."""
     task = _task("international_credit_score")
-    resp = await intl_client.post("/tasks/send", json=task)
+    resp = await intl_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["status"] == "completed"
@@ -88,7 +90,7 @@ async def test_intl_task_send_returns_completed(intl_client: httpx.AsyncClient):
 async def test_synthesis_task_send_returns_completed(synthesis_client: httpx.AsyncClient):
     """POST /tasks/send to Synthesis returns completed with valid decision."""
     task = _task("risk_synthesis", extra_input={"outcomes": []})
-    resp = await synthesis_client.post("/tasks/send", json=task)
+    resp = await synthesis_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["status"] == "completed"
@@ -106,7 +108,7 @@ async def test_correlation_id_echoed_back(equifax_client: httpx.AsyncClient):
     """correlation_id sent to agent is echoed back unchanged."""
     task = _task("credit_score")
     task["correlation_id"] = "corr-phase3-echo-test"
-    resp = await equifax_client.post("/tasks/send", json=task)
+    resp = await equifax_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert resp.status_code == 200, resp.text
     assert resp.json()["correlation_id"] == "corr-phase3-echo-test"
 
@@ -118,7 +120,7 @@ async def test_correlation_id_echoed_back(equifax_client: httpx.AsyncClient):
 async def test_get_task_after_completion(equifax_client: httpx.AsyncClient):
     """GET /tasks/{task_id} retrieves a previously completed task."""
     task = _task("credit_score")
-    post_resp = await equifax_client.post("/tasks/send", json=task)
+    post_resp = await equifax_client.post("/tasks/send", json=task, headers=AUTH_HEADERS)
     assert post_resp.status_code == 200
     task_id = post_resp.json()["task_id"]
 
@@ -148,7 +150,7 @@ async def test_verify_returns_task_id(orchestrator_client: httpx.AsyncClient):
         "has_foreign_addr": True,
         "consent": True,
     }
-    resp = await orchestrator_client.post("/verify", json=body)
+    resp = await orchestrator_client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["task_id"]
@@ -165,7 +167,7 @@ async def test_verify_task_completes(orchestrator_client: httpx.AsyncClient):
         "has_foreign_addr": True,
         "consent": True,
     }
-    resp = await orchestrator_client.post("/verify", json=body)
+    resp = await orchestrator_client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     task_id = resp.json()["task_id"]
 
@@ -189,7 +191,7 @@ async def test_agent_task_written_to_db(orchestrator_client: httpx.AsyncClient):
         "has_foreign_addr": True,
         "consent": True,
     }
-    resp = await orchestrator_client.post("/verify", json=body)
+    resp = await orchestrator_client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     task_id = data["task_id"]

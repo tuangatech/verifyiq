@@ -15,6 +15,8 @@ import uuid
 import pytest
 import httpx
 
+from conftest import AUTH_HEADERS
+
 pytestmark = pytest.mark.asyncio
 
 VALID_DECISIONS = {"approve", "review", "decline"}
@@ -43,7 +45,7 @@ async def _submit_and_wait(
     client: httpx.AsyncClient, body: dict, timeout: int = 60
 ) -> tuple[str, str, dict]:
     """Submit a verify request and poll until terminal status or timeout."""
-    resp = await client.post("/verify", json=body)
+    resp = await client.post("/verify", json=body, headers=AUTH_HEADERS)
     assert resp.status_code == 200, resp.text
     data = resp.json()
     task_id = data["task_id"]

@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 
+from conftest import AUTH_HEADERS
 from agents.shared.schemas import (
     EquifaxArtifact,
     EmploymentArtifact,
@@ -32,7 +33,7 @@ async def test_equifax_produces_valid_artifact(equifax_client):
         "subject_id": "S001", "subject_name": "Jane Doe",
         "use_case": "mortgage", "has_foreign_addr": True,
     })
-    resp = await equifax_client.post("/tasks/send", json=payload)
+    resp = await equifax_client.post("/tasks/send", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -50,7 +51,7 @@ async def test_equifax_output_varies(equifax_client):
             "subject_id": f"S-{name.replace(' ', '')}", "subject_name": name,
             "use_case": "mortgage", "has_foreign_addr": False,
         })
-        resp = await equifax_client.post("/tasks/send", json=payload)
+        resp = await equifax_client.post("/tasks/send", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "completed"
@@ -65,7 +66,7 @@ async def test_employment_produces_valid_artifact(employment_client):
         "subject_id": "S002", "subject_name": "John Smith",
         "use_case": "mortgage", "has_foreign_addr": False,
     })
-    resp = await employment_client.post("/tasks/send", json=payload)
+    resp = await employment_client.post("/tasks/send", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -81,7 +82,7 @@ async def test_intl_full_when_foreign_addr_true(intl_client):
         "subject_id": "S003", "subject_name": "Maria Garcia",
         "use_case": "mortgage", "has_foreign_addr": True,
     })
-    resp = await intl_client.post("/tasks/send", json=payload)
+    resp = await intl_client.post("/tasks/send", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -96,7 +97,7 @@ async def test_intl_unavailable_when_no_foreign_addr(intl_client):
         "subject_id": "S004", "subject_name": "Tom Brown",
         "use_case": "rental", "has_foreign_addr": False,
     })
-    resp = await intl_client.post("/tasks/send", json=payload)
+    resp = await intl_client.post("/tasks/send", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -145,7 +146,7 @@ async def test_synthesis_produces_valid_decision(synthesis_client):
         },
     ]
     payload = _task("risk_synthesis", {"outcomes": outcomes, "use_case": "mortgage"})
-    resp = await synthesis_client.post("/tasks/send", json=payload)
+    resp = await synthesis_client.post("/tasks/send", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -187,7 +188,7 @@ async def test_synthesis_declines_on_weak_profile(synthesis_client):
         },
     ]
     payload = _task("risk_synthesis", {"outcomes": outcomes, "use_case": "mortgage"})
-    resp = await synthesis_client.post("/tasks/send", json=payload)
+    resp = await synthesis_client.post("/tasks/send", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"
@@ -229,7 +230,7 @@ async def test_synthesis_handles_timed_out_outcome(synthesis_client):
         },
     ]
     payload = _task("risk_synthesis", {"outcomes": outcomes, "use_case": "mortgage"})
-    resp = await synthesis_client.post("/tasks/send", json=payload)
+    resp = await synthesis_client.post("/tasks/send", json=payload, headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "completed"

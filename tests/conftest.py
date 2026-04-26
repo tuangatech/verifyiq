@@ -1,7 +1,18 @@
 # tests/conftest.py
+import os
+
 import pytest
 import pytest_asyncio
 import httpx
+
+AUTH_TOKEN = os.environ.get("VERIFYIQ_AUTH_TOKEN", "verifyiq-dev-token-2026")
+AUTH_HEADERS = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+
+
+@pytest.fixture
+def auth_headers() -> dict[str, str]:
+    """Bearer token headers for protected endpoints."""
+    return dict(AUTH_HEADERS)
 
 
 @pytest_asyncio.fixture
