@@ -40,7 +40,7 @@ cp .env.example .env
 # Fill in OPENROUTER_API_KEY
 
 # 2. Start services
-docker compose up --build
+docker compose down && docker compose up --build -d
 
 # 3. Install CLI
 uv pip install -e cli/
