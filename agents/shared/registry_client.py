@@ -11,6 +11,17 @@ import os
 from pathlib import Path
 
 import httpx
+import structlog
+
+logger = structlog.get_logger()
+
+
+def _auth_headers() -> dict[str, str]:
+    """Return Authorization header if VERIFYIQ_AUTH_TOKEN is set."""
+    token = os.environ.get("VERIFYIQ_AUTH_TOKEN")
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    return {}
 
 
 async def register_with_registry(agent_card_path: str = "agent_card.json") -> str | None:
@@ -25,18 +36,18 @@ async def register_with_registry(agent_card_path: str = "agent_card.json") -> st
     """
     registry_url = os.environ.get("AGENT_REGISTRY_URL")
     if not registry_url:
-        print("[Registry Client] AGENT_REGISTRY_URL not set — skipping registration")
+        logger.warning("registration_skipped", reason="AGENT_REGISTRY_URL not set")
         return None
 
     card_path = Path(agent_card_path)
     if not card_path.exists():
-        print(f"[Registry Client] Agent card not found at {agent_card_path} — skipping registration")
+        logger.warning("registration_skipped", reason=f"Agent card not found at {agent_card_path}")
         return None
 
     try:
         card = json.loads(card_path.read_text())
     except Exception as e:
-        print(f"[Registry Client] Failed to read agent card: {e} — skipping registration")
+        logger.warning("registration_skipped", reason=f"Failed to read agent card: {e}")
         return None
 
     # Extract skill IDs from the card's skills array
@@ -59,17 +70,19 @@ async def register_with_registry(agent_card_path: str = "agent_card.json") -> st
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.post(f"{registry_url}/register", json=payload)
+            response = await client.post(
+                f"{registry_url}/register", json=payload, headers=_auth_headers(),
+            )
             if response.status_code == 201:
                 result = response.json()
                 url_hash = result.get("url_hash", "unknown")
-                print(f"[Registry Client] Registered successfully — url_hash: {url_hash}")
+                logger.info("registration_success", url_hash=url_hash)
                 return url_hash
             else:
-                print(f"[Registry Client] Registration failed: {response.status_code} {response.text}")
+                logger.warning("registration_failed", status=response.status_code, body=response.text)
                 return None
     except Exception as e:
-        print(f"[Registry Client] Registration failed: {e}")
+        logger.warning("registration_failed", error=str(e))
         return None
 
 
@@ -89,10 +102,12 @@ async def deregister_from_registry(url_hash: str | None) -> None:
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.delete(f"{registry_url}/agents/{url_hash}")
+            response = await client.delete(
+                f"{registry_url}/agents/{url_hash}", headers=_auth_headers(),
+            )
             if response.status_code == 200:
-                print(f"[Registry Client] Deregistered successfully — url_hash: {url_hash}")
+                logger.info("deregistration_success", url_hash=url_hash)
             else:
-                print(f"[Registry Client] Deregistration failed: {response.status_code} {response.text}")
+                logger.warning("deregistration_failed", status=response.status_code, body=response.text)
     except Exception as e:
-        print(f"[Registry Client] Deregistration failed: {e}")
+        logger.warning("deregistration_failed", error=str(e))

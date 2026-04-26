@@ -17,7 +17,14 @@ class VerifyIQClient:
 
     def __init__(self) -> None:
         self.base_url = os.environ.get("VERIFYIQ_URL", DEFAULT_URL)
+        self._auth_token = os.environ.get("VERIFYIQ_AUTH_TOKEN")
         self._client = httpx.Client(base_url=self.base_url, timeout=10.0)
+
+    def _auth_headers(self) -> dict[str, str]:
+        """Return Authorization header if token is configured."""
+        if self._auth_token:
+            return {"Authorization": f"Bearer {self._auth_token}"}
+        return {}
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         """Send a request, handle connection errors uniformly."""
@@ -41,7 +48,7 @@ class VerifyIQClient:
 
     def submit_verification(self, payload: dict) -> dict:
         """POST /verify — submit a verification request."""
-        resp = self._request("POST", "/verify", json=payload)
+        resp = self._request("POST", "/verify", json=payload, headers=self._auth_headers())
         return resp.json()
 
     def get_status(self, task_id: str) -> dict:
