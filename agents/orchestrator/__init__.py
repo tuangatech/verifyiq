@@ -10,13 +10,17 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from starlette.responses import StreamingResponse
 
 import structlog
 
 from agents.shared.a2a_types import A2ATask, AgentOutcome
+from agents.shared.auth import require_auth
+from agents.shared.logging import configure_logging
 from agents.shared.registry_client import register_with_registry, deregister_from_registry
+
+configure_logging("orchestrator")
 from .db import TaskManager
 from .dispatcher import TaskDispatcher
 from .models import (
@@ -90,7 +94,7 @@ def health():
 
 
 @app.post("/verify")
-async def verify(body: VerificationRequest) -> VerifyResponse:
+async def verify(body: VerificationRequest, _token: str = Depends(require_auth)) -> VerifyResponse:
     """Accept a verification request, persist it, and return task info."""
     task_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())

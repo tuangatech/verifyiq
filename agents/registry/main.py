@@ -9,9 +9,16 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, "/app")
 
-from fastapi import FastAPI, HTTPException, Query
+import structlog
+
+from fastapi import Depends, FastAPI, HTTPException, Query
 
 from agents.shared.a2a_types import RegisterRequest, RegisteredAgent
+from agents.shared.auth import require_auth
+from agents.shared.logging import configure_logging
+
+configure_logging("registry")
+logger = structlog.get_logger()
 
 DB_PATH = os.getenv("DB_PATH", "/data/registry.db")
 
@@ -43,7 +50,7 @@ def init_db() -> None:
             )
         """)
         conn.commit()
-    print(f"[Registry] Database initialised at {DB_PATH}")
+    logger.info("db_initialised", path=DB_PATH)
 
 
 def make_url_hash(url: str) -> str:
@@ -67,7 +74,7 @@ def health():
 
 
 @app.post("/register", status_code=201)
-def register(body: RegisterRequest):
+def register(body: RegisterRequest, _token: str = Depends(require_auth)):
     """Upsert an agent row; returns url_hash so the caller can deregister later."""
     url_hash = make_url_hash(body.url)
     now = datetime.now(timezone.utc).isoformat()
@@ -95,8 +102,7 @@ def register(body: RegisterRequest):
         )
         conn.commit()
 
-    skills_str = ", ".join(body.skills)
-    print(f"[Registry] Registered: {body.name} @ {body.url} | skills: {skills_str}")
+    logger.info("agent_registered", name=body.name, url=body.url, skills=body.skills)
 
     return {"url_hash": url_hash, "message": f"Registered {body.name}"}
 
@@ -133,7 +139,7 @@ def list_agents(skill: str | None = Query(None)):
 
 
 @app.delete("/agents/{url_hash}")
-def deregister(url_hash: str):
+def deregister(url_hash: str, _token: str = Depends(require_auth)):
     """Remove an agent by url_hash; 404 if not found."""
     with get_db() as conn:
         cur = conn.execute(

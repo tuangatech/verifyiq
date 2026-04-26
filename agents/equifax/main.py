@@ -7,10 +7,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+import structlog
+
+from fastapi import Depends, FastAPI, HTTPException
 
 from agents.shared.a2a_types import A2ATask, A2ATaskResult, AgentError
+from agents.shared.auth import require_auth
+from agents.shared.logging import configure_logging
 from agents.shared.registry_client import register_with_registry, deregister_from_registry
+
+configure_logging("equifax")
+logger = structlog.get_logger()
 from agents.equifax.tools import (
     build_persona_seed,
     call_llm_credit_profile,
@@ -50,8 +57,10 @@ def health():
 
 
 @app.post("/tasks/send")
-async def tasks_send(task: A2ATask) -> A2ATaskResult:
+async def tasks_send(task: A2ATask, _token: str = Depends(require_auth)) -> A2ATaskResult:
     """Accept an A2A task, call LLM to generate a credit profile, validate, and return."""
+    log = logger.bind(task_id=task.task_id, correlation_id=task.correlation_id, skill=task.skill)
+    log.info("task_received")
     started_at = datetime.now(timezone.utc).isoformat()
     seed = build_persona_seed(task.input)
 

@@ -7,10 +7,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+import structlog
+
+from fastapi import Depends, FastAPI, HTTPException
 
 from agents.shared.a2a_types import A2ATask, A2ATaskResult, AgentError
+from agents.shared.auth import require_auth
+from agents.shared.logging import configure_logging
 from agents.shared.registry_client import register_with_registry, deregister_from_registry
+
+configure_logging("employment")
+logger = structlog.get_logger()
 from agents.shared.schemas import EmploymentArtifact
 from agents.employment.graph import build_employment_graph
 
@@ -47,7 +54,7 @@ def health():
 
 
 @app.post("/tasks/send")
-async def tasks_send(task: A2ATask) -> A2ATaskResult:
+async def tasks_send(task: A2ATask, _token: str = Depends(require_auth)) -> A2ATaskResult:
     """Accept an A2A task, run the LangGraph employment verification pipeline, validate, and return.
 
     Error paths:
@@ -55,6 +62,8 @@ async def tasks_send(task: A2ATask) -> A2ATaskResult:
     - Node-level error in state → LLM_VALIDATION_FAILED
     - Pydantic validation of final artifact → LLM_VALIDATION_FAILED
     """
+    log = logger.bind(task_id=task.task_id, correlation_id=task.correlation_id, skill=task.skill)
+    log.info("task_received")
     started_at = datetime.now(timezone.utc).isoformat()
 
     # Build initial state from task.input

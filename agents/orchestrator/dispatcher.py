@@ -2,6 +2,7 @@
 """Sends outbound A2A tasks to remote agents and returns AgentOutcome objects."""
 
 import asyncio
+import os
 
 import httpx
 import structlog
@@ -21,6 +22,13 @@ class TaskDispatcher:
     def __init__(self, timeout: float = 35.0):
         """Configure the HTTP timeout (slightly above AGENT_TIMEOUT_SECONDS)."""
         self.timeout = timeout
+        self._auth_token = os.environ.get("VERIFYIQ_AUTH_TOKEN")
+
+    def _auth_headers(self) -> dict[str, str]:
+        """Return Authorization header if token is configured."""
+        if self._auth_token:
+            return {"Authorization": f"Bearer {self._auth_token}"}
+        return {}
 
     @staticmethod
     def _is_retryable(error: Exception) -> bool:
@@ -37,6 +45,7 @@ class TaskDispatcher:
             response = await client.post(
                 f"{agent_url}/tasks/send",
                 json=task.model_dump(),
+                headers=self._auth_headers(),
             )
             response.raise_for_status()
             return response
