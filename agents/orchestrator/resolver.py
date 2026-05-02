@@ -1,7 +1,11 @@
 # agents/orchestrator/resolver.py
 import asyncio
+import hashlib
 import os
 import httpx
+import structlog
+
+logger = structlog.get_logger()
 
 
 class NoCandidateAgentError(Exception):
@@ -47,6 +51,21 @@ class AgentResolver:
         """Resolve multiple skills in parallel; raises NoCandidateAgentError if any skill has no candidates."""
         urls = await asyncio.gather(*[self.find(skill) for skill in skills])
         return dict(zip(skills, urls))
+
+    async def report_latency(self, agent_url: str, latency_ms: int) -> None:
+        """Report observed latency to the Registry so future resolution prefers faster agents."""
+        url_hash = hashlib.sha256(agent_url.encode()).hexdigest()[:16]
+        try:
+            auth_token = os.environ.get("VERIFYIQ_AUTH_TOKEN")
+            headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.post(
+                    f"{self.registry_url}/agents/{url_hash}/latency",
+                    json={"latency_ms": latency_ms},
+                    headers=headers,
+                )
+        except Exception:
+            logger.debug("latency_report_failed", agent_url=agent_url)
 
     async def list_all(self) -> list[dict]:
         """Return all registered agents; returns [] on any error (never raises)."""

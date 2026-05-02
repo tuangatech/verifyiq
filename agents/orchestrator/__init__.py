@@ -245,6 +245,13 @@ async def run_verification(
             outcome = await dispatcher.dispatch(agent_url, a2a_task, agent_name)
 
             ended_at = datetime.now(timezone.utc).isoformat()
+
+            # Report observed latency to Registry for future agent selection
+            dispatch_start = datetime.fromisoformat(started_at)
+            dispatch_end = datetime.fromisoformat(ended_at)
+            latency_ms = int((dispatch_end - dispatch_start).total_seconds() * 1000)
+            asyncio.create_task(resolver.report_latency(agent_url, latency_ms))
+
             task_manager.complete_agent_task(
                 agent_task_id, outcome.status,
                 outcome.artifact, outcome.error.model_dump() if outcome.error else None, ended_at,
@@ -281,36 +288,30 @@ async def run_verification(
         )
         outcomes: list[AgentOutcome] = list(parallel_outcomes)
 
-        # 7. Add skipped agent outcomes for agents not in the parallel plan
-        all_possible = {
-            "credit_score": "equifax",
-            "employment_status": "employment",
-            "international_credit_score": "intl",
-        }
-        invoked_skills = {skill for skill, _, _ in plan["parallel"]}
-        for skill, agent_name in all_possible.items():
-            if skill not in invoked_skills:
-                skipped_task_id = str(uuid.uuid4())
-                now_ts = datetime.now(timezone.utc).isoformat()
-                task_manager.create_agent_task(
-                    skipped_task_id, task_id, correlation_id,
-                    agent_name, skill, {}, 0, now_ts,
-                )
-                task_manager.complete_agent_task(
-                    skipped_task_id, "skipped", None, None, now_ts,
-                )
-                outcomes.append(AgentOutcome(
-                    agent_name=agent_name,
-                    skill=skill,
-                    status="skipped",
-                    artifact=None,
-                    error=None,
-                ))
-                # Emit agent_skipped event
-                await sse_streamer.emit(
-                    task_id, correlation_id, EVENT_TYPE_AGENT_SKIPPED,
-                    build_agent_skipped_payload(agent_name, "not required for this use case"),
-                )
+        # 7. Add skipped outcomes for skills not in the parallel plan.
+        #    Skipping is skill-level: if multiple agents serve "credit_score",
+        #    Synthesis sees one "credit_score: skipped", not one per agent.
+        for skill in plan.get("skipped_skills", []):
+            skipped_task_id = str(uuid.uuid4())
+            now_ts = datetime.now(timezone.utc).isoformat()
+            task_manager.create_agent_task(
+                skipped_task_id, task_id, correlation_id,
+                skill, skill, {}, 0, now_ts,
+            )
+            task_manager.complete_agent_task(
+                skipped_task_id, "skipped", None, None, now_ts,
+            )
+            outcomes.append(AgentOutcome(
+                agent_name=skill,
+                skill=skill,
+                status="skipped",
+                artifact=None,
+                error=None,
+            ))
+            await sse_streamer.emit(
+                task_id, correlation_id, EVENT_TYPE_AGENT_SKIPPED,
+                build_agent_skipped_payload(skill, "skill not required for this use case"),
+            )
 
         log.info(
             "parallel_phase_complete",
@@ -350,6 +351,13 @@ async def run_verification(
         )
 
         ended_at = datetime.now(timezone.utc).isoformat()
+
+        # Report synthesis latency
+        synth_start = datetime.fromisoformat(started_at)
+        synth_end = datetime.fromisoformat(ended_at)
+        synth_latency_ms = int((synth_end - synth_start).total_seconds() * 1000)
+        asyncio.create_task(resolver.report_latency(synthesis_url, synth_latency_ms))
+
         error_dict = synthesis_outcome.error.model_dump() if synthesis_outcome.error else None
         task_manager.complete_agent_task(
             synthesis_task_id, synthesis_outcome.status,

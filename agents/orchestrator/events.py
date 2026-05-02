@@ -34,9 +34,9 @@ def build_agent_failed_payload(agent: str, status: str, error: str) -> dict[str,
     return {"agent": agent, "status": status, "error": error}
 
 
-def build_agent_skipped_payload(agent: str, reason: str) -> dict[str, Any]:
-    """Build payload for agent_skipped event."""
-    return {"agent": agent, "reason": reason}
+def build_agent_skipped_payload(skill: str, reason: str) -> dict[str, Any]:
+    """Build payload for skill_skipped event."""
+    return {"skill": skill, "reason": reason}
 
 
 def build_synthesis_started_payload(agent: str) -> dict[str, Any]:

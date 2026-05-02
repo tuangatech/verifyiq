@@ -35,12 +35,19 @@ All inter-agent communication goes through `POST /tasks/send` (A2A protocol). No
 ## Quick Start
 
 ```bash
+cd verifyiq
+source .venv/Scripts/activate
+
 # 1. Environment
 cp .env.example .env
 # Fill in OPENROUTER_API_KEY
 
+VERIFYIQ_AUTH_TOKEN=my-secret-token-123
+
 # 2. Start services
 docker compose down && docker compose up --build -d
+
+docker compose ps  # check status
 
 # 3. Install CLI
 uv pip install -e cli/
