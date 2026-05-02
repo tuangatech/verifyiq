@@ -138,6 +138,39 @@ def list_agents(skill: str | None = Query(None)):
     return agents
 
 
+@app.post("/agents/{url_hash}/latency")
+def report_latency(url_hash: str, body: dict, _token: str = Depends(require_auth)):
+    """Update avg_latency_ms using an exponential moving average (alpha=0.3)."""
+    latency_ms = body.get("latency_ms")
+    if latency_ms is None or not isinstance(latency_ms, (int, float)):
+        raise HTTPException(400, "latency_ms required (number)")
+    latency_ms = int(latency_ms)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT avg_latency_ms FROM registered_agents WHERE url_hash = ?",
+            (url_hash,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, f"Agent {url_hash} not found")
+
+        current = row["avg_latency_ms"]
+        alpha = 0.3
+        if current is None:
+            new_avg = latency_ms
+        else:
+            new_avg = int(alpha * latency_ms + (1 - alpha) * current)
+
+        conn.execute(
+            "UPDATE registered_agents SET avg_latency_ms = ?, last_seen = ? WHERE url_hash = ?",
+            (new_avg, datetime.now(timezone.utc).isoformat(), url_hash),
+        )
+        conn.commit()
+
+    logger.info("latency_reported", url_hash=url_hash, latency_ms=latency_ms, avg=new_avg)
+    return {"url_hash": url_hash, "avg_latency_ms": new_avg}
+
+
 @app.delete("/agents/{url_hash}")
 def deregister(url_hash: str, _token: str = Depends(require_auth)):
     """Remove an agent by url_hash; 404 if not found."""
