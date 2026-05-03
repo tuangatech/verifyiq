@@ -61,6 +61,7 @@ with open(agent_card_path) as f:
     AGENT_CARD = json.load(f)
 
 _url_hash: str | None = None
+_external_task_map: dict[str, dict[str, str]] = {}
 resolver = AgentResolver()
 task_manager = TaskManager()
 sse_streamer = SSEStreamer(task_manager)
@@ -172,6 +173,83 @@ async def stream_verification(
     async def event_stream() -> AsyncGenerator[str, None]:
         # Stream events from sse_streamer
         async for event in sse_streamer.stream(task_id, correlation_id):
+            yield event
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/tasks/send")
+async def a2a_tasks_send(task: A2ATask, _token: str = Depends(require_auth)) -> dict:
+    """A2A callee: accept an inbound task from an external orchestrator."""
+    if task.skill != "verify_subject":
+        raise HTTPException(422, f"Unsupported skill: {task.skill}")
+
+    body = VerificationRequest(**task.input)
+    internal_task_id = str(uuid.uuid4())
+    correlation_id = str(uuid.uuid4())
+
+    _external_task_map[task.task_id] = {
+        "internal_task_id": internal_task_id,
+        "correlation_id": correlation_id,
+    }
+
+    task_manager.create_verification_request(internal_task_id, correlation_id, body)
+    asyncio.create_task(run_verification(internal_task_id, correlation_id, body))
+
+    return {"task_id": task.task_id, "status": "submitted"}
+
+
+@app.get("/tasks/{task_id}")
+def get_a2a_task(task_id: str) -> dict:
+    """A2A callee: poll status of an externally-submitted task."""
+    mapping = _external_task_map.get(task_id)
+    if mapping is None:
+        raise HTTPException(404, "Task not found")
+
+    internal_task_id = mapping["internal_task_id"]
+    result = task_manager.get_verification_request(internal_task_id)
+    if result is None:
+        raise HTTPException(404, "Task not found")
+
+    response = {
+        "task_id": task_id,
+        "status": result["status"],
+        "correlation_id": mapping["correlation_id"],
+        "internal_task_id": internal_task_id,
+        "artifact": None,
+    }
+
+    if result["status"] == "completed":
+        full = task_manager.get_full_verification(internal_task_id)
+        if full and full.get("agent_tasks"):
+            for at in full["agent_tasks"]:
+                if at.get("skill") == "risk_synthesis" and at.get("status") == "completed":
+                    response["artifact"] = at.get("artifact")
+                    break
+
+    return response
+
+
+@app.get("/tasks/{task_id}/stream")
+async def stream_a2a_task(task_id: str) -> StreamingResponse:
+    """A2A callee: SSE stream for an externally-submitted task."""
+    mapping = _external_task_map.get(task_id)
+    if mapping is None:
+        raise HTTPException(404, "Task not found")
+
+    internal_task_id = mapping["internal_task_id"]
+    correlation_id = mapping["correlation_id"]
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        async for event in sse_streamer.stream(internal_task_id, correlation_id):
             yield event
 
     return StreamingResponse(
