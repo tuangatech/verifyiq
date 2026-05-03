@@ -1,8 +1,10 @@
 # cli/verifyiq_cli/commands/run.py
 """verifyiq run <scenario> — submit a scenario and stream results."""
 
+import os
 import time
 
+import httpx
 import typer
 from rich.console import Console
 
@@ -22,7 +24,7 @@ def run_scenario(
     payload = get_scenario(scenario)
 
     if scenario == "mortgage-platform":
-        console.print("UC-5 (Mortgage Platform) is not yet implemented. Available in Phase 9.")
+        _run_mortgage_platform(payload, json_output)
         raise typer.Exit(code=0)
 
     client = VerifyIQClient()
@@ -61,3 +63,28 @@ def _stream_events(client: VerifyIQClient, task_id: str) -> None:
     """Iterate SSE events and render each one."""
     for event in client.stream_events(task_id):
         render_sse_event(event)
+
+
+def _run_mortgage_platform(payload: dict, json_output: bool) -> None:
+    """Route UC-5 through the Mortgage Platform service instead of directly to Orchestrator."""
+    mp_url = os.environ.get("MORTGAGE_PLATFORM_URL", "http://localhost:9000")
+    console.print(f"[bold]UC-5:[/bold] Sending to Mortgage Platform at {mp_url}")
+
+    try:
+        resp = httpx.post(f"{mp_url}/trigger", json=payload, timeout=120.0)
+        resp.raise_for_status()
+        result = resp.json()
+    except httpx.ConnectError:
+        console.print(
+            f"[bold red]Cannot connect to Mortgage Platform at {mp_url}.[/bold red]\n"
+            "Is it running? Start with: docker compose --profile uc5 up -d"
+        )
+        raise typer.Exit(code=1)
+
+    status = result.get("status", "-")
+    artifact = result.get("artifact")
+    decision = artifact.get("decision", "-") if isinstance(artifact, dict) else "-"
+    console.print(f"[bold]Result:[/bold] status={status}  decision={decision}")
+
+    if json_output:
+        render_json(result)

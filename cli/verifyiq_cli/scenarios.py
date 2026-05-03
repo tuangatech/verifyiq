@@ -39,7 +39,13 @@ SCENARIOS: dict[str, dict] = {
         "has_foreign_addr": True,
         "consent": True,
     },
-    "mortgage-platform": None,
+    "mortgage-platform": {
+        "subject_name": "David Kim",
+        "subject_id": "SIM-KR-2018",
+        "use_case": "mortgage",
+        "has_foreign_addr": True,
+        "consent": True,
+    },
 }
 
 
