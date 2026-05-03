@@ -55,3 +55,10 @@ async def synthesis_client():
     """Async HTTP client pointed at the Synthesis agent."""
     async with httpx.AsyncClient(base_url="http://localhost:8004", timeout=35.0) as client:
         yield client
+
+
+@pytest_asyncio.fixture
+async def mortgage_platform_client():
+    """Async HTTP client pointed at the Mortgage Platform service."""
+    async with httpx.AsyncClient(base_url="http://localhost:9000", timeout=120.0) as client:
+        yield client
