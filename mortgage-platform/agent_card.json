@@ -1,0 +1,18 @@
+{
+  "name": "Mortgage Platform Orchestrator",
+  "description": "Mortgage loan origination platform. Delegates verification to VerifyIQ via A2A protocol.",
+  "url": "http://mortgage-platform:9000",
+  "version": "1.0.0",
+  "skills": [
+    {
+      "id": "loan_origination",
+      "name": "Mortgage Loan Origination",
+      "description": "End-to-end mortgage loan processing including verification"
+    }
+  ],
+  "auth_schemes": [],
+  "capabilities": {
+    "streaming": false,
+    "push_notifications": false
+  }
+}
