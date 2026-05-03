@@ -120,6 +120,26 @@ services:
       timeout: 5s
       retries: 3
 
+  mortgage-platform:
+    build:
+      context: .
+      dockerfile: mortgage-platform/Dockerfile
+    ports:
+      - "9000:9000"
+    environment:
+      - VERIFYIQ_URL=http://orchestrator:8000
+      - VERIFYIQ_AUTH_TOKEN=${VERIFYIQ_AUTH_TOKEN}
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles:
+      - uc5
+
 volumes:
   sqlite_data:
   registry_data:

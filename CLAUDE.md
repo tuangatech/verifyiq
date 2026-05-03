@@ -10,7 +10,7 @@ orchestration patterns — do not simplify away the complexity; it is the point.
 ```
 Mortgage Platform (:9000)  ← UC-5 external A2A caller (Phase 9 stretch)
         │ A2A POST /tasks/send
-Orchestrator (:8000)       ← ADK + FastAPI hub
+Orchestrator (:8000)       ← FastAPI hub (caller + callee)
         │ GET /agents?skill=
 Agent Registry (:8099)     ← FastAPI; self-registration + skill discovery
         ▲ POST /register on startup
@@ -25,7 +25,7 @@ All inter-agent comms: `POST /tasks/send`. No shared DBs, no cross-service impor
 | Layer | Tech |
 |---|---|
 | CLI | Python + typer + rich + httpx |
-| Orchestrator | Python + FastAPI + ADK |
+| Orchestrator | Python + FastAPI |
 | Data agents | Python + FastAPI (Employment: LangGraph) |
 | LLM routing | OpenRouter — `google/gemini-3-flash` (agents), `openai/gpt-5.4-mini` (synthesis) |
 | Shared schemas | Pydantic in `agents/shared/` |
@@ -135,7 +135,7 @@ Write tests **before** moving to the next phase.
 | 6 | LangGraph Employment Agent + SSE streaming |
 | 7 | CLI — `verifyiq run/agents/history/inspect`; new Orchestrator endpoints |
 | 8 | Auth + polish (stretch) |
-| 9 | ADK server-side + Mortgage Platform UC-5 (stretch) |
+| 9 | A2A callee endpoints + Mortgage Platform UC-5 (stretch) |
 
 ## Use Cases
 
@@ -155,7 +155,7 @@ Write tests **before** moving to the next phase.
 - **SQLite** — zero ops; single writer per DB; swap conn string for cloud migration
 - **Plain Python functions** over MCP servers — same pattern, no wire protocol overhead
 - **LangGraph in Employment only** — framework-agnostic interop without LangGraph-heavy orchestration
-- **ADK server-side only** — earns its cost on UC-5 inbound protocol; outbound uses plain `httpx`
+- **No ADK** — full agent framework tied to Google ecosystem; hides protocol mechanics; ~80 lines of FastAPI replaces it
 - **Global timeout** — per-skill config adds complexity without value at this scale
 
 ## Common Pitfalls
