@@ -8,7 +8,7 @@ orchestration patterns — do not simplify away the complexity; it is the point.
 ## Architecture
 
 ```
-Mortgage Platform (:9000)  ← UC-5 external A2A caller (Phase 9 stretch)
+Mortgage Platform (:9000)  ← UC-5 external A2A caller (Phase 9)
         │ A2A POST /tasks/send
 Orchestrator (:8000)       ← FastAPI hub (caller + callee)
         │ GET /agents?skill=
@@ -135,7 +135,7 @@ Write tests **before** moving to the next phase.
 | 6 | LangGraph Employment Agent + SSE streaming |
 | 7 | CLI — `verifyiq run/agents/history/inspect`; new Orchestrator endpoints |
 | 8 | Auth + polish (stretch) |
-| 9 | A2A callee endpoints + Mortgage Platform UC-5 (stretch) |
+| 9 | A2A callee endpoints + Mortgage Platform UC-5 ✅ |
 
 ## Use Cases
 
@@ -164,7 +164,8 @@ Write tests **before** moving to the next phase.
 - Never collapse `timed_out` into `failed` — they carry different meaning in synthesis prompts
 - No agent URL literals in Orchestrator logic — all discovery through `AgentResolver` → Registry
 - Phase 3 uses stub artifacts deliberately — isolates LLM bugs from protocol bugs in Phase 4
-- `mortgage-platform` starts explicitly only (`docker compose up mortgage-platform`) — not default
+- `mortgage-platform` starts explicitly only (`docker compose --profile uc5 up`) — not default
+- `mortgage-platform/` has zero imports from `agents/shared/` — protocol-only boundary
 
 ## Development Environment
 - Windows 11 + Git Bash (MINGW64) — all shell commands use Unix syntax

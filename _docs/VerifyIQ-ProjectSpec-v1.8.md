@@ -535,6 +535,7 @@ The Orchestrator is the system's hub. It plays two distinct roles depending on w
 | `GET /verify/{task_id}` | GET | Poll for task status (CLI or external caller) |
 | `POST /tasks/send` | POST | **A2A server endpoint** — receives inbound tasks from external orchestrators (plain FastAPI) |
 | `GET /tasks/{task_id}` | GET | A2A task status — polled by external orchestrators |
+| `GET /tasks/{task_id}/stream` | GET | **A2A SSE stream** — forwards internal SSE events to external callers |
 | `GET /verify/history` | GET | Past verification requests — subject, use case, timestamp, decision |
 | `GET /verify/{task_id}/full` | GET | Full artifact dump — all agent outcomes + final decision |
 | `GET /agents` | GET | Proxies Registry contents for the CLI agent table |
@@ -658,6 +659,48 @@ The Orchestrator is the system's hub. It plays two distinct roles depending on w
 | `validate_decision_artifact(raw)` | Validates against `VerificationDecision` Pydantic model |
 
 **Output artifact:** decision (approve/review/decline), confidence, risk score, decision factors, risk flags, international note, reasoning summary.
+
+---
+
+### 6.8 Mortgage Platform Orchestrator — FastAPI + httpx (:9000)
+
+**Role:** External A2A caller for UC-5. Simulates a mortgage loan origination platform maintained by a separate team. Has **zero imports from `agents/shared/`** — knows only the A2A wire protocol.
+
+**Key constraint:** Protocol-only boundary. The Dockerfile does not copy `agents/shared/`. All request/response types are defined locally or used as plain dicts. If this service can't talk to VerifyIQ, the A2A protocol documentation is insufficient.
+
+**Docker Compose:** `profiles: [uc5]` — does not start with default `docker compose up`.
+
+**Endpoints:**
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Liveness check (port 9000) |
+| `/.well-known/agent.json` | GET | Mortgage Platform's own Agent Card |
+| `/trigger` | POST | Trigger a verification via A2A: discover → submit → poll → return result |
+
+**`POST /trigger` flow:**
+1. Discover Orchestrator via `GET /.well-known/agent.json`
+2. Validate `verify_subject` skill is advertised
+3. Build A2A task with `skill="verify_subject"` and subject payload
+4. Submit via `POST /tasks/send` with bearer auth
+5. Poll `GET /tasks/{task_id}` every 2s until terminal status (90s timeout)
+6. Return final result
+
+Accepts optional JSON body to override the default subject (David Kim, SIM-KR-2018, mortgage, `has_foreign_addr: true`).
+
+**Internal component:**
+
+`A2AClient` (`a2a_client.py`) — httpx-based A2A client class with `discover()`, `send_task()`, `get_task()`, `stream_task()`, `send_and_wait()`. Pure protocol implementation.
+
+**Package structure:**
+```
+mortgage-platform/
+  main.py               # FastAPI app — /health, /trigger, /.well-known/agent.json
+  a2a_client.py          # httpx A2A client — discover, send, poll, stream
+  agent_card.json        # Mortgage Platform's Agent Card
+  requirements.txt       # fastapi, uvicorn, pydantic, httpx, structlog
+  Dockerfile             # python:3.12.5-slim-bookworm; NO agents/shared/ copy
+```
 
 ---
 
@@ -996,7 +1039,19 @@ Testing focuses on A2A protocol mechanics and orchestration patterns — the par
 - `verifyiq agents`: renders table with all registered agents
 - `verifyiq history`: shows past requests; `verifyiq inspect <task_id>` shows full artifact dump
 - All `correlation_id` values consistent across all SQLite rows for each request
-- `verifyiq run mortgage-platform` (UC-5): exits with "not yet implemented" until Phase 9
+- `verifyiq run mortgage-platform` (UC-5): routes through Mortgage Platform service → Orchestrator → full pipeline
+
+---
+
+### UC-5 / Phase 9 Tests
+
+- Agent card advertises `auth_schemes: ["bearer"]` and `verify_subject` skill with `streaming: true`
+- `POST /tasks/send` returns `task_id` + `status: "submitted"` immediately (< 3s)
+- `POST /tasks/send` rejects missing auth token with 401
+- `POST /tasks/send` rejects unsupported skill with 422
+- Full A2A round-trip: send → poll `GET /tasks/{task_id}` → `completed` with `VerificationDecision` artifact
+- SSE stream (`GET /tasks/{task_id}/stream`) delivers at least 3 events including `agents_resolved` and terminal event
+- Mortgage Platform `POST /trigger` completes end-to-end A2A round-trip with decision (requires `--profile uc5`)
 
 ---
 
@@ -1055,12 +1110,14 @@ Local only — all services run on a single developer machine via Docker Desktop
 ║  │  ┌────────────┐  :8000                                 │   │  ║
 ║  │  │orchestrator│◄───────────────────────────────┐       │   │  ║
 ║  │  └─────┬──────┘                                │       │   │  ║
-║  │        │ GET /agents?skill=                    │       │   │  ║
-║  │        ▼                                       │       │   │  ║
-║  │  ┌────────────┐  :8099                         │       │   │  ║
-║  │  │  registry  │  registry.db (vol)             │       │   │  ║
-║  │  └────────────┘                                │       │   │  ║
-║  │        ▲ POST /register                        │       │   │  ║
+║  │        │ GET /agents?skill=    ▲               │       │   │  ║
+║  │        │               POST /tasks/send        │       │   │  ║
+║  │        ▼                       │               │       │   │  ║
+║  │  ┌────────────┐  :8099   ┌─────┴──────────┐   │       │   │  ║
+║  │  │  registry  │          │mortgage-platform│   │       │   │  ║
+║  │  │ registry.db│          │  :9000          │   │       │   │  ║
+║  │  └────────────┘          │ (--profile uc5) │   │       │   │  ║
+║  │        ▲ POST /register  └────────────────┘    │       │   │  ║
 ║  │        │                                       │       │   │  ║
 ║  │  ┌─────┴──────────────────┐                    │       │   │  ║
 ║  │  │  :8001  :8002  :8003   │                    │       │   │  ║
@@ -1093,7 +1150,7 @@ Local only — all services run on a single developer machine via Docker Desktop
 | Employment Agent | 8002 | |
 | International Agent | 8003 | |
 | Risk Synthesis Agent | 8004 | |
-| **Mortgage Platform Orchestrator** | **9000** | **UC-5 only — simulated external caller** |
+| **Mortgage Platform Orchestrator** | **9000** | **UC-5 — external A2A caller; starts with `--profile uc5`** |
 
 ### Docker Volumes
 
@@ -1148,7 +1205,7 @@ Each agent has its own `requirements.txt`. Common dependencies (FastAPI, uvicorn
 
 ### Dockerfiles
 
-Each agent: `python:3.11-slim` base, copies `agents/shared/` and the agent directory, installs `requirements.txt`, exposes its port. The CLI runs on the host (not containerized).
+Each agent: `python:3.12.5-slim-bookworm` base, copies `agents/shared/` and the agent directory, installs `requirements.txt`, exposes its port. The Mortgage Platform Dockerfile does NOT copy `agents/shared/` — enforcing the protocol-only boundary. The CLI runs on the host (not containerized).
 
 ### Running One Agent Outside Docker
 
@@ -1238,7 +1295,7 @@ Build the `cli/` Python package (`verifyiq-cli`). Structure: `pyproject.toml`, `
 - `verifyiq agents` — rich table of registered agents
 - `verifyiq history [--limit N]` — past verification requests
 - `verifyiq inspect <task_id>` — full artifact dump with rich panels
-- `verifyiq run mortgage-platform` — exits with "not yet implemented" until Phase 9
+- `verifyiq run mortgage-platform` — routes through Mortgage Platform service (implemented in Phase 9)
 
 **Tests:** All End-to-End Flow tests from Section 10 (UC-1a through UC-4, agents, history, inspect).
 
@@ -1254,15 +1311,36 @@ Bearer token verification: agents validate `Authorization: Bearer <token>` on `P
 
 ---
 
-### Phase 9 — A2A Callee Endpoints + Mortgage Platform (stretch)
+### Phase 9 — A2A Callee Endpoints + Mortgage Platform ✅
 
-Add inbound A2A callee endpoints to the Orchestrator in plain FastAPI: `POST /tasks/send` (accept task, start pipeline in background, return `task_id` immediately), `GET /tasks/{task_id}` (task status visible to external callers), `GET /tasks/{task_id}/stream` (forward internal SSE events to external caller). These endpoints map the external caller's task ID to an internal `task_id` and `correlation_id`, then call the same `run_verification()` pipeline used by `POST /verify`. ~80 lines of new code using the existing `TaskManager` and `SSEStreamer`.
+Added three inbound A2A callee endpoints to the Orchestrator in `agents/orchestrator/__init__.py` (~60 lines of new code):
 
-Build the `mortgage-platform` service — a minimal FastAPI + httpx service (~80 lines) at `:9000`. On startup it discovers VerifyIQ's Agent Card, confirms the `verify_subject` skill, dispatches an A2A task with a sample mortgage subject, connects to the SSE stream, and logs progress events and the final `VerificationDecision` to stdout. Added to `docker-compose.yml` with `depends_on: orchestrator` and `profiles: [uc5]`; started explicitly (`docker compose --profile uc5 up mortgage-platform`) so it does not interrupt the default UC-1–4 workflow.
+- **`POST /tasks/send`** — accepts an `A2ATask` with `skill="verify_subject"`, validates the skill, extracts `VerificationRequest` from `task.input`, generates internal `task_id` + `correlation_id`, stores the external→internal mapping in `_external_task_map` (in-memory dict), starts `run_verification()` via `asyncio.create_task`, returns `{"task_id": external_id, "status": "submitted"}` immediately. Auth required via `require_auth`.
+- **`GET /tasks/{task_id}`** — looks up the external task ID in `_external_task_map`, reads internal status via `task_manager.get_verification_request()`, extracts the synthesis artifact from `task_manager.get_full_verification()` on completion. Returns `task_id`, `status`, `artifact`, `correlation_id`, `internal_task_id`.
+- **`GET /tasks/{task_id}/stream`** — looks up mapping, delegates to `sse_streamer.stream(internal_task_id, correlation_id)`. Returns `StreamingResponse` with same SSE format as `/verify/{task_id}/stream`.
 
-**Tests:** All UC-5 tests from Section 10: `task_id` returned immediately; `GET /tasks/{task_id}` returns `working` while pipeline runs; SSE delivers progress to Mortgage Platform; final result is `completed` with `VerificationDecision`; `correlation_id` propagates into all internal `agent_tasks` rows; re-sending the task produces a new independent pipeline run.
+Updated `agents/orchestrator/agent_card.json`: `auth_schemes` changed from `[]` to `["bearer"]`.
 
-**Goal:** VerifyIQ is a true A2A peer. External teams can call it without knowledge of its internal pipeline. The A2A server protocol is implemented by hand — fully understood, fully visible, fully consistent with the rest of the codebase.
+Built the `mortgage-platform/` service — a standalone FastAPI + httpx service at `:9000` with **zero imports from `agents/shared/`**:
+
+- `a2a_client.py` — `A2AClient` class with `discover()`, `send_task()`, `get_task()`, `stream_task()`, `send_and_wait()` methods. Pure httpx, protocol-only.
+- `main.py` — `POST /trigger` discovers the Orchestrator via Agent Card, builds an A2A task, submits via `send_and_wait()` (2s poll interval, 90s timeout), returns the final result. Accepts optional body to override the default subject (David Kim, SIM-KR-2018, mortgage).
+- `agent_card.json`, `Dockerfile`, `requirements.txt`.
+
+Added to `docker-compose.yml` with `depends_on: orchestrator` and `profiles: [uc5]`; starts only with `docker compose --profile uc5 up -d`.
+
+Updated CLI: `cli/verifyiq_cli/scenarios.py` now has a real payload for `mortgage-platform`. `cli/verifyiq_cli/commands/run.py` routes `mortgage-platform` scenario to `POST /trigger` on the Mortgage Platform service.
+
+**Tests (`tests/test_phase9_uc5.py`):** 7 tests:
+1. Agent card advertises `auth_schemes: ["bearer"]` and `verify_subject` skill
+2. `POST /tasks/send` returns `submitted` immediately (< 3s)
+3. `POST /tasks/send` rejects missing auth (401)
+4. `POST /tasks/send` rejects wrong skill (422)
+5. Full A2A round-trip: send → poll → `completed` with `decision` in artifact
+6. SSE stream delivers `agents_resolved` + terminal event for A2A-submitted task
+7. Mortgage Platform `POST /trigger` completes end-to-end (requires `--profile uc5`)
+
+**Goal achieved:** VerifyIQ is a true A2A peer. External teams can call it without knowledge of its internal pipeline. The A2A server protocol is implemented by hand — fully understood, fully visible, fully consistent with the rest of the codebase.
 
 ---
 
@@ -1278,7 +1356,7 @@ Build the `mortgage-platform` service — a minimal FastAPI + httpx service (~80
 
 **Circuit breaker.** If an agent fails repeatedly across requests, the Orchestrator currently retries each time. A circuit breaker (trip after N consecutive failures, half-open after cooldown) would skip known-bad agents without even attempting. The Registry `health` field already provides a manual version — automating it is a natural extension.
 
-**Chaos / resilience testing.** Randomly failing or slowing one agent during a test run and verifying Orchestrator behavior (timeouts, retries, partial results) is high-value but requires a test harness for container-level fault injection. Phase 9 stretch goal alongside the Mortgage Platform work.
+**Chaos / resilience testing.** Randomly failing or slowing one agent during a test run and verifying Orchestrator behavior (timeouts, retries, partial results) is high-value but requires a test harness for container-level fault injection.
 
 ### Known Simplifications vs. Production
 
@@ -1422,4 +1500,4 @@ This is the correct design for a deterministic pipeline. If the workflow require
 
 ---
 
-*Document version: 1.8 | Last updated: 2026-05-03 | Status: Ready for implementation*
+*Document version: 1.8 | Last updated: 2026-05-03 | Status: All phases implemented (Phase 9 completed)*
