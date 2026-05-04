@@ -1,6 +1,6 @@
-# Most "Multi-Agent" Demos Are Just Function Calls Wearing a Trenchcoat
+# Most "Multi-Agent" Demos Are Just Function Calls in Disguise
 
-**I built a platform with 4 LLM-powered agents and 2 infrastructure services — each in its own Docker container, discovered by the orchestrator at runtime through a registry — that still produces a risk decision when agents fail, time out, or return garbage.**
+**A credit verification platform with 6 independent agents and A2A protocol**
 
 ---
 
