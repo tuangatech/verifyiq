@@ -7,6 +7,8 @@ import time
 import httpx
 import typer
 from rich.console import Console
+from rich.live import Live
+from rich.spinner import Spinner
 
 from ..client import VerifyIQClient
 from ..display import render_json, render_sse_event
@@ -81,10 +83,35 @@ def _run_mortgage_platform(payload: dict, json_output: bool) -> None:
         )
         raise typer.Exit(code=1)
 
-    status = result.get("status", "-")
+    task_id = result.get("task_id")
+    console.print(f"[bold]Submitted:[/bold] task_id={task_id}")
+
+    # Poll mortgage platform until terminal status with a spinner
+    start = time.time()
+    with Live(Spinner("dots", text="working"), console=console, refresh_per_second=10) as live:
+        while True:
+            time.sleep(1)
+            elapsed = int(time.time() - start)
+            try:
+                poll_resp = httpx.get(f"{mp_url}/trigger/{task_id}", timeout=30.0)
+                poll_resp.raise_for_status()
+                poll_result = poll_resp.json()
+            except Exception:
+                live.update(Spinner("dots", text=f"polling… ({elapsed}s)"))
+                continue
+
+            status = poll_result.get("status", "")
+
+            if status in ("completed", "failed", "timed_out"):
+                result = poll_result
+                break
+
+            live.update(Spinner("dots", text=f"{status} ({elapsed}s)"))
+
+
     artifact = result.get("artifact")
     decision = artifact.get("decision", "-") if isinstance(artifact, dict) else "-"
-    console.print(f"[bold]Result:[/bold] status={status}  decision={decision}")
+    console.print(f"\n[bold]Final:[/bold] status={result.get('status')}  decision={decision}")
 
     if json_output:
         render_json(result)
