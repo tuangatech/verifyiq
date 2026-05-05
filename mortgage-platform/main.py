@@ -12,6 +12,8 @@ from pydantic import BaseModel
 
 import structlog
 
+import httpx
+
 from a2a_client import A2AClient
 
 structlog.configure(
@@ -56,12 +58,11 @@ def health():
 
 @app.post("/trigger")
 async def trigger(body: Optional[TriggerRequest] = None):
-    """Trigger a verification workflow against VerifyIQ via A2A protocol.
+    """Submit a verification task to VerifyIQ. Returns task_id for polling.
 
     1. Discover the Orchestrator's agent card
     2. Submit an A2A task with skill=verify_subject
-    3. Poll until terminal status
-    4. Return the final result
+    3. Return task_id + submitted status immediately
     """
     body = body or TriggerRequest()
     client = A2AClient(VERIFYIQ_URL, AUTH_TOKEN)
@@ -89,10 +90,27 @@ async def trigger(body: Optional[TriggerRequest] = None):
         "attempt": 1,
     }
 
-    # 3. Submit and wait
+    # 3. Submit (non-blocking)
     log.info("submitting_verification", task_id=task["task_id"], subject=body.subject_name)
-    result = await client.send_and_wait(task, poll_interval=2.0, timeout=90.0)
+    ack = await client.send_task(task)
 
-    log.info("verification_result", task_id=task["task_id"], status=result.get("status"))
+    log.info("task_accepted", task_id=task["task_id"], status=ack.get("status"))
+
+    return {"task_id": task["task_id"], "status": ack.get("status", "submitted")}
+
+
+@app.get("/trigger/{task_id}")
+async def poll_trigger(task_id: str):
+    """Poll the status of a previously submitted verification task."""
+    client = A2AClient(VERIFYIQ_URL, AUTH_TOKEN)
+
+    try:
+        result = await client.get_task(task_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(404, "Task not found")
+        raise HTTPException(502, f"Upstream error: {exc.response.status_code}")
+    except Exception as exc:
+        raise HTTPException(502, f"Cannot reach VerifyIQ Orchestrator: {exc}")
 
     return result
