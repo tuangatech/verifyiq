@@ -37,18 +37,25 @@ All inter-agent communication goes through `POST /tasks/send` (A2A protocol). No
 ## Quick Start
 
 ```bash
-# 1. Environment
+# 1. Clone and enter the project
+cd verifyiq
+
+# 2. Environment
 cp .env.example .env
 # Fill in OPENROUTER_API_KEY
 
-# 2. Start services
+# 3. Start services
 docker compose down && docker compose up --build -d
 
-# 3. Install CLI
+# 4. Start Mortgage Platform (UC-5)
+docker compose --profile uc5 up --build -d
+
+# 5. Install CLI
 uv pip install -e cli/
 
-# 4. Run a verification
+# 6. Run verifications
 verifyiq run mortgage-intl
+verifyiq run mortgage-platform
 ```
 
 ## Use Cases
