@@ -56,3 +56,7 @@ htmlcov/
 
 # uv lock files (optional - uncomment if you want to ignore)
 # uv.lock
+
+# docs
+_docs/medium-article.md
+_archived/
