@@ -60,3 +60,4 @@ htmlcov/
 # docs
 _docs/medium-article.md
 _archived/
+.claude/
